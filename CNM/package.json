@@ -1,0 +1,10 @@
+{
+  "dependencies": {
+    "@react-native-firebase/app": "^21.11.0",
+    "@react-native-firebase/auth": "^21.11.0",
+    "body-parser": "^2.2.0",
+    "express": "^5.1.0",
+    "nodemailer": "^6.10.0",
+    "socket.io-client": "^4.8.1"
+  }
+}
