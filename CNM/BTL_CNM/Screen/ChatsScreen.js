@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, FlatList, Image, StyleSheet } from 'react-native';
 import { db } from '../Firebase/Firebase';
 import { collection, addDoc, onSnapshot, query, where, getDocs, setDoc } from 'firebase/firestore';
+import { launchImageLibrary } from 'react-native-image-picker';
+import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import uuid from 'react-native-uuid';
 
 export default function ChatsScreen({ route }) {
@@ -76,6 +78,71 @@ export default function ChatsScreen({ route }) {
     }
   };
 
+   const uploadImage = () => {
+        launchImageLibrary({
+            mediaType: 'photo',
+            quality: 0.8,
+            includeBase64: false,
+            selectionLimit: 1,
+        }, async (response) => {
+            try {
+                if (response.didCancel) {
+                    console.log('User cancelled image picker');
+                    return;
+                }
+
+                if (response.errorCode) {
+                    console.log('ImagePicker Error: ', response.errorMessage);
+                    return;
+                }
+
+                if (!response.assets || response.assets.length === 0) {
+                    console.log('No assets selected');
+                    return;
+                }
+
+                const asset = response.assets[0];
+                if (!conversationId) {
+                    console.log('No conversation ID available');
+                    return;
+                }
+
+                setIsUploading(true);
+
+                const type = 'image';
+                const fileName = `${uuid.v4()}-${asset.fileName || 'image.jpg'}`;
+                const fileRef = ref(getStorage(), `data/${currentUserId}/${fileName}`);
+
+                const responseBlob = await fetch(asset.uri);
+                const blob = await responseBlob.blob();
+
+                // Tải lên hình ảnh lên Firebase Storage
+                await uploadBytes(fileRef, blob);
+                const downloadURL = await getDownloadURL(fileRef);
+
+                // Thêm tin nhắn hình ảnh vào Firestore
+                await addDoc(collection(db, MESSAGE_COLLECTION), {
+                    con_id: conversationId,
+                    sender_id: currentUserId,
+                    receiver_id: chatWithUserId,
+                    content: asset.fileName || '',
+                    type,
+                    url: downloadURL,
+                    createdAt: Date.now(),
+                    timestamp: Date.now(),
+                    isRevoked: false,
+                    seen: false
+                });
+
+                console.log('File uploaded successfully');
+            } catch (error) {
+                console.error('Error uploading file:', error);
+                Alert.alert('Error', 'Could not upload file. Please try again.');
+            } finally {
+                setIsUploading(false);
+            }
+        });
+    };
   return (
     <View style={styles.container}>
       <FlatList
@@ -86,7 +153,11 @@ export default function ChatsScreen({ route }) {
             styles.messageContainer,
             item.sender_id === currentUserId ? styles.userMessage : styles.friendMessage
           ]}>
-            <Text style={styles.messageText}>{item.content}</Text>
+            {item.type === 'image' ? (
+              <Image source={{ uri: item.url }} style={styles.image} />
+            ) : (
+              <Text style={styles.messageText}>{item.content}</Text>
+            )}
           </View>
         )}
       />
@@ -100,6 +171,9 @@ export default function ChatsScreen({ route }) {
         />
         <TouchableOpacity onPress={sendMessage} style={styles.sendButton}>
           <Text style={styles.sendButtonText}>Send</Text>
+        </TouchableOpacity>
+        <TouchableOpacity onPress={uploadImage} style={styles.sendButton}>
+          <Text style={styles.sendButtonText}>Image</Text>
         </TouchableOpacity>
       </View>
     </View>
@@ -127,6 +201,11 @@ const styles = StyleSheet.create({
   },
   messageText: {
     fontSize: 16
+  },
+  image: {
+    width: 200,
+    height: 200,
+    borderRadius: 10
   },
   inputContainer: {
     flexDirection: 'row',
