@@ -54,6 +54,34 @@ export const imageMessageApi = {
   }
 };
 
+// Gửi video
+export const videoMessageApi = {
+  sendVideoMessage: async (file, userId, conversationId) => {
+    try {
+      const fileName = `${Date.now()}_${file.name}`;
+      const storageRef = ref(storage, `videos/${userId}/${fileName}`);
+      await uploadBytes(storageRef, file);
+      const downloadURL = await getDownloadURL(storageRef);
+
+      const messageData = {
+        con_id: conversationId,
+        sender_id: userId,
+        content: file.name,
+        type: 'video',
+        url: downloadURL,
+        createdAt: Date.now(),
+        seen: false
+      };
+
+      const messageRef = await addDoc(collection(db, 'Messages'), messageData);
+      return messageRef.id;
+    } catch (error) {
+      console.error('Lỗi khi gửi video:', error);
+      throw error;
+    }
+  }
+};
+
 // Gửi lời mời kết bạn
 export const friendApi = {
   sendFriendRequest: async (fromUserId, toUserId) => {

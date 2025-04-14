@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, TextInput, TouchableOpacity, FlatList, Image, StyleSheet } from 'react-native';
+import Video from 'react-native-video';
 import { db } from '../Firebase/Firebase';
 import { collection, addDoc, onSnapshot, query, where, getDocs, setDoc } from 'firebase/firestore';
 import { launchImageLibrary } from 'react-native-image-picker';
@@ -78,71 +79,41 @@ export default function ChatsScreen({ route }) {
     }
   };
 
-   const uploadImage = () => {
-        launchImageLibrary({
-            mediaType: 'photo',
-            quality: 0.8,
-            includeBase64: false,
-            selectionLimit: 1,
-        }, async (response) => {
-            try {
-                if (response.didCancel) {
-                    console.log('User cancelled image picker');
-                    return;
-                }
+  const uploadMedia = (type) => {
+    launchImageLibrary({
+      mediaType: type,
+      quality: 0.8,
+      includeBase64: false,
+      selectionLimit: 1,
+    }, async (response) => {
+      try {
+        if (response.didCancel || response.errorCode || !response.assets?.length) return;
 
-                if (response.errorCode) {
-                    console.log('ImagePicker Error: ', response.errorMessage);
-                    return;
-                }
+        const asset = response.assets[0];
+        const fileName = `${uuid.v4()}-${asset.fileName || (type === 'video' ? 'video.mp4' : 'image.jpg')}`;
+        const fileRef = ref(getStorage(), `${type}s/${currentUserId}/${fileName}`);
 
-                if (!response.assets || response.assets.length === 0) {
-                    console.log('No assets selected');
-                    return;
-                }
+        const responseBlob = await fetch(asset.uri);
+        const blob = await responseBlob.blob();
 
-                const asset = response.assets[0];
-                if (!conversationId) {
-                    console.log('No conversation ID available');
-                    return;
-                }
+        await uploadBytes(fileRef, blob);
+        const downloadURL = await getDownloadURL(fileRef);
 
-                setIsUploading(true);
-
-                const type = 'image';
-                const fileName = `${uuid.v4()}-${asset.fileName || 'image.jpg'}`;
-                const fileRef = ref(getStorage(), `data/${currentUserId}/${fileName}`);
-
-                const responseBlob = await fetch(asset.uri);
-                const blob = await responseBlob.blob();
-
-                // Tải lên hình ảnh lên Firebase Storage
-                await uploadBytes(fileRef, blob);
-                const downloadURL = await getDownloadURL(fileRef);
-
-                // Thêm tin nhắn hình ảnh vào Firestore
-                await addDoc(collection(db, MESSAGE_COLLECTION), {
-                    con_id: conversationId,
-                    sender_id: currentUserId,
-                    receiver_id: chatWithUserId,
-                    content: asset.fileName || '',
-                    type,
-                    url: downloadURL,
-                    createdAt: Date.now(),
-                    timestamp: Date.now(),
-                    isRevoked: false,
-                    seen: false
-                });
-
-                console.log('File uploaded successfully');
-            } catch (error) {
-                console.error('Error uploading file:', error);
-                Alert.alert('Error', 'Could not upload file. Please try again.');
-            } finally {
-                setIsUploading(false);
-            }
+        await addDoc(collection(db, 'Messages'), {
+          con_id: conversationId,
+          sender_id: currentUserId,
+          content: asset.fileName || '',
+          type,
+          url: downloadURL,
+          createdAt: Date.now(),
+          seen: false
         });
-    };
+      } catch (error) {
+        console.error(`Error uploading ${type}:`, error);
+      }
+    });
+  };
+
   return (
     <View style={styles.container}>
       <FlatList
@@ -155,6 +126,13 @@ export default function ChatsScreen({ route }) {
           ]}>
             {item.type === 'image' ? (
               <Image source={{ uri: item.url }} style={styles.image} />
+            ) : item.type === 'video' ? (
+              <Video
+                source={{ uri: item.url }}
+                style={styles.video}
+                controls
+                resizeMode="contain"
+              />
             ) : (
               <Text style={styles.messageText}>{item.content}</Text>
             )}
@@ -172,8 +150,11 @@ export default function ChatsScreen({ route }) {
         <TouchableOpacity onPress={sendMessage} style={styles.sendButton}>
           <Text style={styles.sendButtonText}>Send</Text>
         </TouchableOpacity>
-        <TouchableOpacity onPress={uploadImage} style={styles.sendButton}>
-          <Text style={styles.sendButtonText}>Image</Text>
+        <TouchableOpacity onPress={() => uploadMedia('photo')} style={styles.sendButton}>
+          <Text style={styles.sendButtonText}>Ảnh</Text>
+        </TouchableOpacity>
+        <TouchableOpacity onPress={() => uploadMedia('video')} style={styles.sendButton}>
+          <Text style={styles.sendButtonText}>Video</Text>
         </TouchableOpacity>
       </View>
     </View>
@@ -205,6 +186,11 @@ const styles = StyleSheet.create({
   image: {
     width: 200,
     height: 200,
+    borderRadius: 10
+  },
+  video: {
+    width: 250,
+    height: 180,
     borderRadius: 10
   },
   inputContainer: {
