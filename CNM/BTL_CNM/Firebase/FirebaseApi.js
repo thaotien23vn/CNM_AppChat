@@ -82,6 +82,28 @@ export const videoMessageApi = {
   }
 };
 
+// Gửi emoji (tin nhắn dạng text nhưng chứa emoji)
+export const emojiMessageApi = {
+  sendEmojiMessage: async (emoji, userId, conversationId) => {
+    try {
+      const messageData = {
+        con_id: conversationId,
+        sender_id: userId,
+        content: emoji,
+        type: 'emoji',
+        createdAt: Date.now(),
+        seen: false
+      };
+
+      const messageRef = await addDoc(collection(db, 'Messages'), messageData);
+      return messageRef.id;
+    } catch (error) {
+      console.error('Lỗi khi gửi emoji:', error);
+      throw error;
+    }
+  }
+};
+
 // Gửi lời mời kết bạn
 export const friendApi = {
   sendFriendRequest: async (fromUserId, toUserId) => {

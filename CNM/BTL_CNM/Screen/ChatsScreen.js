@@ -1,17 +1,19 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, TextInput, TouchableOpacity, FlatList, Image, StyleSheet } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, FlatList, Image, StyleSheet, Modal } from 'react-native';
 import Video from 'react-native-video';
 import { db } from '../Firebase/Firebase';
 import { collection, addDoc, onSnapshot, query, where, getDocs, setDoc } from 'firebase/firestore';
 import { launchImageLibrary } from 'react-native-image-picker';
 import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import uuid from 'react-native-uuid';
+import EmojiSelector from 'react-native-emoji-selector';
 
 export default function ChatsScreen({ route }) {
   const { currentUserId, chatWithUserId } = route?.params || {};
   const [messages, setMessages] = useState([]);
   const [inputText, setInputText] = useState('');
   const [conversationId, setConversationId] = useState(null);
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
 
   useEffect(() => {
     const findOrCreateConversation = async () => {
@@ -114,6 +116,11 @@ export default function ChatsScreen({ route }) {
     });
   };
 
+  const handleEmojiSelect = (emoji) => {
+    setInputText((prev) => prev + emoji);
+    setShowEmojiPicker(false);
+  };
+
   return (
     <View style={styles.container}>
       <FlatList
@@ -156,7 +163,21 @@ export default function ChatsScreen({ route }) {
         <TouchableOpacity onPress={() => uploadMedia('video')} style={styles.sendButton}>
           <Text style={styles.sendButtonText}>Video</Text>
         </TouchableOpacity>
+        <TouchableOpacity onPress={() => setShowEmojiPicker(!showEmojiPicker)} style={styles.sendButton}>
+          <Text style={styles.sendButtonText}>😊</Text>
+        </TouchableOpacity>
       </View>
+
+      {showEmojiPicker && (
+        <Modal animationType="slide" transparent={false} visible={showEmojiPicker}>
+          <EmojiSelector
+            onEmojiSelected={handleEmojiSelect}
+            showSearchBar={false}
+            showTabs={true}
+            showHistory={true}
+          />
+        </Modal>
+      )}
     </View>
   );
 }
