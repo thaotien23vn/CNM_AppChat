@@ -1,0 +1,2 @@
+💬 Ứng dụng VibeChat với Firebase Realtime Database
+Ứng dụng này là một giải pháp chat đa nền tảng, bao gồm ứng dụng di động (React Native) và ứng dụng web (ReactJS), được xây dựng dựa trên sức mạnh của Firebase Realtime Database cho việc quản lý dữ liệu thời gian thực. Ứng dụng cung cấp các tính năng cơ bản của một ứng dụng chat hiện đại, cho phép người dùng kết nối và trò chuyện một cách dễ dàng trên nhiều thiết bị.
