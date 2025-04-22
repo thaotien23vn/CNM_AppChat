@@ -667,7 +667,95 @@ export default function ChatGroup({ route, navigation }) {
     }
   }, [forwardMessage, selectedConversations, currentUser]);
 
-    // Hàm lấy tên thành viên
+  // Hàm rời nhóm
+  const leaveGroup = async () => {
+    try {
+      if (!groupId || !currentUser || !groupInfo) {
+        Alert.alert('Lỗi', 'Không thể rời nhóm. Vui lòng thử lại sau.');
+        return;
+      }
+
+      // Không cho phép người tạo nhóm rời nhóm nếu còn thành viên khác
+      if (groupInfo.admin === currentUser.uid && groupInfo.members.length > 1) {
+        Alert.alert(
+          'Không thể rời nhóm',
+          'Bạn là người tạo nhóm. Vui lòng chuyển quyền quản trị trước khi rời nhóm.',
+          [{ text: 'Đã hiểu' }]
+        );
+        return;
+      }
+
+      // Nếu chỉ còn một người dùng (người hiện tại), xóa nhóm
+      if (groupInfo.members.length === 1) {
+        try {
+          // Xóa tất cả tin nhắn của nhóm
+          const messagesQuery = query(collection(db, MESSAGE_COLLECTION), where('con_id', '==', groupId));
+          const messagesSnapshot = await getDocs(messagesQuery);
+          const deletePromises = messagesSnapshot.docs.map(doc => deleteDoc(doc.ref));
+          await Promise.all(deletePromises);
+
+          // Xóa tất cả liên kết UserConversation
+          const userConvsQuery = query(collection(db, 'UserConversation'), where('con_id', '==', groupId));
+          const userConvsSnapshot = await getDocs(userConvsQuery);
+          const deleteUserConvPromises = userConvsSnapshot.docs.map(doc => deleteDoc(doc.ref));
+          await Promise.all(deleteUserConvPromises);
+
+          // Xóa nhóm
+          await deleteDoc(doc(db, 'Conversations', groupId));
+
+          Alert.alert('Thành công', 'Đã xóa nhóm vì bạn là thành viên cuối cùng.');
+        } catch (deleteError) {
+          console.error('Lỗi khi xóa nhóm:', deleteError);
+          Alert.alert('Lỗi', 'Không thể xóa nhóm. Vui lòng thử lại.');
+          return;
+        }
+      } else {
+        // Cập nhật danh sách thành viên để loại bỏ người dùng hiện tại
+        const updatedMembers = groupInfo.members.filter(id => id !== currentUser.uid);
+        
+        // Cập nhật nhóm
+        await updateDoc(doc(db, 'Conversations', groupId), {
+          members: updatedMembers
+        });
+
+        // Xóa liên kết UserConversation
+        const userConvQuery = query(
+          collection(db, 'UserConversation'), 
+          where('con_id', '==', groupId),
+          where('user_id', '==', currentUser.uid)
+        );
+        const userConvSnapshot = await getDocs(userConvQuery);
+        if (!userConvSnapshot.empty) {
+          await deleteDoc(userConvSnapshot.docs[0].ref);
+        }
+
+        // Thêm tin nhắn hệ thống thông báo người dùng đã rời nhóm
+        await addDoc(collection(db, MESSAGE_COLLECTION), {
+          con_id: groupId,
+          sender_id: 'system',
+          content: `${user?.fullName || currentUser.email} đã rời khỏi nhóm`,
+          type: 'system',
+          createdAt: Date.now(),
+          timestamp: Date.now(),
+          isRevoked: false,
+          seen: false
+        });
+
+        Alert.alert('Thành công', 'Bạn đã rời khỏi nhóm.');
+      }
+
+      // Reset navigation về danh sách nhóm, không cho quay lại màn hình nhóm cũ
+      navigation.reset({
+        index: 0,
+        routes: [{ name: 'Groups' }],
+      });
+    } catch (error) {
+      console.error('Lỗi khi rời nhóm:', error);
+      Alert.alert('Lỗi', 'Không thể rời nhóm. Vui lòng thử lại sau.');
+    }
+  };
+
+  // Hàm lấy tên thành viên
   const getMemberName = (senderId) => {
     if (senderId === 'system') return 'Hệ thống';
     
@@ -940,7 +1028,95 @@ export default function ChatGroup({ route, navigation }) {
     setIsAddingMembers(false);
   }, [groupId, groupInfo, selectedFriends]);
 
- 
+  // Thêm hàm xóa thành viên
+  const removeMemberFromGroup = useCallback(async (memberId) => {
+    if (!groupId || !groupInfo || !groupInfo.is_group) return;
+    if (groupInfo.admin === memberId) {
+      Alert.alert('Lỗi', 'Không thể xóa quản trị viên khỏi nhóm.');
+      return;
+    }
+    const memberToRemove = members.find(member => member.id === memberId);
+    const memberName = memberToRemove?.fullName || memberToRemove?.name || memberToRemove?.email || 'Một thành viên';
+    try {
+      await conversationApi.removeMemberFromGroup(groupId, memberId);
+      setMembers(prev => prev.filter(member => member.id !== memberId));
+      await addDoc(collection(db, MESSAGE_COLLECTION), {
+        con_id: groupId,
+        content: `${memberName} đã bị xóa khỏi nhóm`,
+        sender_id: "system",
+        type: "system",
+        createdAt: Date.now(),
+        timestamp: Date.now(),
+        isRevoked: false,
+        seen: false
+      });
+      // Cập nhật lại groupInfo (nếu cần)
+      const groupDoc = await getDoc(doc(db, 'Conversations', groupId));
+      if (groupDoc.exists()) {
+        setGroupInfo(groupDoc.data());
+      }
+    } catch (error) {
+      console.error('Lỗi khi xóa thành viên:', error);
+      Alert.alert('Lỗi', 'Không thể xóa thành viên. Vui lòng thử lại.');
+    }
+  }, [groupId, groupInfo, members]);
+
+  // Hàm xác nhận xóa nhóm (dành cho admin)
+  const handleDeleteGroupConfirmed = async () => {
+    console.log('Bắt đầu xóa nhóm...');
+    try {
+      await addDoc(collection(db, MESSAGE_COLLECTION), {
+        con_id: groupId,
+        content: 'Nhóm sẽ bị giải tán',
+        sender_id: 'system',
+        type: 'system',
+        createdAt: Date.now(),
+        timestamp: Date.now(),
+        isRevoked: false,
+        seen: false
+      });
+      console.log('Đã gửi tin nhắn hệ thống.');
+
+      const messagesQuery = query(collection(db, MESSAGE_COLLECTION), where('con_id', '==', groupId));
+      const messagesSnapshot = await getDocs(messagesQuery);
+      const deletePromises = messagesSnapshot.docs.map(doc => deleteDoc(doc.ref));
+      await Promise.all(deletePromises);
+      console.log('Đã xóa tin nhắn.');
+
+      const userConvsQuery = query(collection(db, 'UserConversation'), where('con_id', '==', groupId));
+      const userConvsSnapshot = await getDocs(userConvsQuery);
+      const deleteUserConvPromises = userConvsSnapshot.docs.map(doc => deleteDoc(doc.ref));
+      await Promise.all(deleteUserConvPromises);
+      console.log('Đã xóa UserConversation.');
+
+      await deleteDoc(doc(db, 'Conversations', groupId));
+      console.log('Đã xóa Conversation.');
+
+      Alert.alert('Thành công', 'Nhóm đã được xóa.');
+      navigation.reset({
+        index: 0,
+        routes: [{ name: 'Groups' }],
+      });
+    } catch (deleteError) {
+      console.error('Lỗi khi xóa nhóm:', deleteError);
+      Alert.alert('Lỗi', 'Không thể xóa nhóm. Vui lòng thử lại.');
+    }
+  };
+
+  const deleteGroup = () => {
+    if (!groupId || !currentUser || !groupInfo) {
+      Alert.alert('Lỗi', 'Không thể xóa nhóm. Vui lòng thử lại sau.');
+      return;
+    }
+    if (groupInfo.admin !== currentUser.uid) {
+      Alert.alert('Lỗi', 'Chỉ trưởng nhóm mới có quyền xóa nhóm.');
+      return;
+    }
+    console.log('Mở Alert xác nhận xóa nhóm');
+    setShowDeleteGroupModal(true);
+  };
+
+  const [showDeleteGroupModal, setShowDeleteGroupModal] = useState(false);
 
   return (
     <Provider>
