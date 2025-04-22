@@ -33,6 +33,7 @@ import 'moment/locale/en-gb';  // Import English locale
 import uuid from 'react-native-uuid';
 import VideoPlayer from '../components/RenderFileMessage';
 import { pickDocument } from '../utils/platformUtils';
+import { conversationApi } from '../Firebase/FirebaseApi';
 
 // Set moment to use English locale
 moment.locale('en-gb');
@@ -78,9 +79,39 @@ export default function ChatGroup({ route, navigation }) {
   const [selectedConversations, setSelectedConversations] = useState([]);
   const [conversations, setConversations] = useState([]);
 
-  const { groupId, groupName } = route.params;
+  // State for members modal
+  const [showMembersModal, setShowMembersModal] = useState(false);
+
+  // State for Add Members modal
+  const [showAddMembersModal, setShowAddMembersModal] = useState(false);
+  const [availableFriends, setAvailableFriends] = useState([]);
+  const [selectedFriends, setSelectedFriends] = useState([]);
+  const [isLoadingFriends, setIsLoadingFriends] = useState(false);
+  const [isAddingMembers, setIsAddingMembers] = useState(false);
+  const [friendSearch, setFriendSearch] = useState('');
+
+  // State cho modal xóa thành viên
+  const [showRemoveMembersModal, setShowRemoveMembersModal] = useState(false);
+
+  const { groupId, groupName } = route.params || {};
   const auth = getAuth();
   const currentUser = auth.currentUser;
+
+  // Robust null/undefined checks for required data
+  if (!groupId) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+        <Text style={{ color: 'red', fontSize: 16 }}>Thiếu thông tin nhóm (groupId)</Text>
+      </View>
+    );
+  }
+  if (!currentUser) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+        <Text style={{ color: 'red', fontSize: 16 }}>Vui lòng đăng nhập lại</Text>
+      </View>
+    );
+  }
 
   // Fetch group information
   useEffect(() => {
@@ -636,86 +667,7 @@ export default function ChatGroup({ route, navigation }) {
     }
   }, [forwardMessage, selectedConversations, currentUser]);
 
-  // Hàm rời nhóm
-  const leaveGroup = async () => {
-    try {
-      if (!groupId || !currentUser || !groupInfo) {
-        Alert.alert('Lỗi', 'Không thể rời nhóm. Vui lòng thử lại sau.');
-        return;
-      }
-
-      // Không cho phép người tạo nhóm rời nhóm nếu còn thành viên khác
-      if (groupInfo.admin === currentUser.uid && groupInfo.members.length > 1) {
-        Alert.alert(
-          'Không thể rời nhóm',
-          'Bạn là người tạo nhóm. Vui lòng chuyển quyền quản trị trước khi rời nhóm.',
-          [{ text: 'Đã hiểu' }]
-        );
-        return;
-      }
-
-      // Nếu chỉ còn một người dùng (người hiện tại), xóa nhóm
-      if (groupInfo.members.length === 1) {
-        // Xóa tất cả tin nhắn của nhóm
-        const messagesQuery = query(collection(db, MESSAGE_COLLECTION), where('con_id', '==', groupId));
-        const messagesSnapshot = await getDocs(messagesQuery);
-        const deletePromises = messagesSnapshot.docs.map(doc => deleteDoc(doc.ref));
-        await Promise.all(deletePromises);
-
-        // Xóa tất cả liên kết UserConversation
-        const userConvsQuery = query(collection(db, 'UserConversation'), where('con_id', '==', groupId));
-        const userConvsSnapshot = await getDocs(userConvsQuery);
-        const deleteUserConvPromises = userConvsSnapshot.docs.map(doc => deleteDoc(doc.ref));
-        await Promise.all(deleteUserConvPromises);
-
-        // Xóa nhóm
-        await deleteDoc(doc(db, 'Conversations', groupId));
-
-        Alert.alert('Thành công', 'Đã xóa nhóm vì bạn là thành viên cuối cùng.');
-      } else {
-        // Cập nhật danh sách thành viên để loại bỏ người dùng hiện tại
-        const updatedMembers = groupInfo.members.filter(id => id !== currentUser.uid);
-        
-        // Cập nhật nhóm
-        await updateDoc(doc(db, 'Conversations', groupId), {
-          members: updatedMembers
-        });
-
-        // Xóa liên kết UserConversation
-        const userConvQuery = query(
-          collection(db, 'UserConversation'), 
-          where('con_id', '==', groupId),
-          where('user_id', '==', currentUser.uid)
-        );
-        const userConvSnapshot = await getDocs(userConvQuery);
-        if (!userConvSnapshot.empty) {
-          await deleteDoc(userConvSnapshot.docs[0].ref);
-        }
-
-        // Thêm tin nhắn hệ thống thông báo người dùng đã rời nhóm
-        await addDoc(collection(db, MESSAGE_COLLECTION), {
-          con_id: groupId,
-          sender_id: 'system',
-          content: `${user?.fullName || currentUser.email} đã rời khỏi nhóm`,
-          type: 'system',
-          createdAt: Date.now(),
-          timestamp: Date.now(),
-          isRevoked: false,
-          seen: false
-        });
-
-        Alert.alert('Thành công', 'Bạn đã rời khỏi nhóm.');
-      }
-      
-      // Quay lại màn hình danh sách nhóm
-      navigation.navigate('Groups');
-    } catch (error) {
-      console.error('Lỗi khi rời nhóm:', error);
-      Alert.alert('Lỗi', 'Không thể rời nhóm. Vui lòng thử lại sau.');
-    }
-  };
-
-  // Hàm lấy tên thành viên
+    // Hàm lấy tên thành viên
   const getMemberName = (senderId) => {
     if (senderId === 'system') return 'Hệ thống';
     
@@ -884,6 +836,112 @@ export default function ChatGroup({ route, navigation }) {
     }).start();
   };
 
+  
+//hàm thêm thành viên
+  const handleAddMembersToGroup = useCallback(async () => {
+    if (!groupId || !groupInfo || !groupInfo.is_group) return;
+    
+    setFriendSearch('');
+    setSelectedFriends([]);
+    setIsLoadingFriends(true);
+    
+    try {
+      // Lấy danh sách thành viên hiện tại
+      const existingMemberIds = groupInfo.members.map(member => 
+        typeof member === 'object' ? member.user_id : member
+      );
+      
+      // Lấy danh sách bạn bè
+       const friendsQuery = query(
+         collection(db, 'friend_requests'),
+         where('status', '==', 'accepted'),
+         where('from', '==', currentUser.uid)
+       );
+       const friendsQuery2 = query(
+         collection(db, 'friend_requests'),
+         where('status', '==', 'accepted'),
+         where('to', '==', currentUser.uid)
+       );
+  
+       const [fromSnap, toSnap] = await Promise.all([getDocs(friendsQuery), getDocs(friendsQuery2)]);
+  
+       const friendIds = new Set();
+       fromSnap.forEach(doc => friendIds.add(doc.data().to));
+       toSnap.forEach(doc => friendIds.add(doc.data().from));
+  
+       const allFriendsPromises = Array.from(friendIds).map(async uid => {
+         const userQ = query(collection(db, 'Users'), where('user_id', '==', uid));
+         const userSnap = await getDocs(userQ);
+         return userSnap.docs[0]?.data();
+       });
+  
+       const allFriends = (await Promise.all(allFriendsPromises)).filter(Boolean);
+      
+      // Lọc ra những bạn bè chưa có trong nhóm
+      const availableFriendsToAdd = allFriends.filter(friend => 
+        !existingMemberIds.includes(friend.user_id)
+      );
+      
+      setAvailableFriends(availableFriendsToAdd);
+      setShowAddMembersModal(true);
+      setShowMembersModal(false); // Close view members modal if open
+    } catch (error) {
+      console.error('Lỗi khi lấy danh sách bạn bè:', error);
+      Alert.alert('Lỗi', 'Không thể lấy danh sách bạn bè');
+    }
+    
+    setIsLoadingFriends(false);
+  }, [groupId, groupInfo, currentUser]);
+
+  // Helper to check if a friend is selected
+  const isFriendSelected = useCallback((friendId) => {
+    return selectedFriends.some(friend => friend.user_id === friendId);
+  }, [selectedFriends]);
+  
+  // Helper to toggle friend selection
+  const toggleFriendSelection = useCallback((friend) => {
+    setSelectedFriends(prev => {
+      if (isFriendSelected(friend.user_id)) {
+        return prev.filter(f => f.user_id !== friend.user_id);
+      } else {
+        return [...prev, friend];
+      }
+    });
+  }, [isFriendSelected]);
+
+  const confirmAddMembers = useCallback(async () => {
+    if (!groupId || !groupInfo || !groupInfo.is_group || selectedFriends.length === 0) {
+      return;
+    }
+    setIsAddingMembers(true);
+    try {
+      // Thêm từng thành viên bằng conversationApi.addMemberToGroup
+      for (const friend of selectedFriends) {
+        await conversationApi.addMemberToGroup(groupId, friend.user_id);
+        // Gửi tin nhắn hệ thống sau khi thêm thành viên
+        await addDoc(collection(db, MESSAGE_COLLECTION), {
+          con_id: groupId,
+          content: `${friend.fullName || friend.name || 'Một thành viên mới'} đã được thêm vào nhóm`,
+          sender_id: "system",
+          type: "system",
+          createdAt: Date.now(),
+          timestamp: Date.now(),
+          isRevoked: false,
+          seen: false
+        });
+      }
+      setShowAddMembersModal(false);
+      setSelectedFriends([]);
+      Alert.alert('Thành công', 'Đã thêm thành viên vào nhóm');
+    } catch (error) {
+      console.error('Lỗi khi thêm thành viên:', error);
+      Alert.alert('Lỗi', 'Không thể thêm thành viên. Vui lòng thử lại.');
+    }
+    setIsAddingMembers(false);
+  }, [groupId, groupInfo, selectedFriends]);
+
+ 
+
   return (
     <Provider>
       <StatusBar barStyle="light-content" backgroundColor="#27548A" />
@@ -914,10 +972,13 @@ export default function ChatGroup({ route, navigation }) {
               />
             }
           >
-            <Menu.Item onPress={safeHandlePress(() => console.log('📌 Ghim'))} title="📌 Ghim trò chuyện" />
-            <Menu.Item onPress={safeHandlePress(() => console.log('🙈 Ẩn'))} title="🙈 Ẩn trò chuyện" />
-            <Menu.Item onPress={safeHandlePress(() => console.log('🕒 Tự xoá'))} title="🕒 Tin nhắn tự xoá" />
-            <Menu.Item onPress={safeHandlePress(() => console.log('⚙️ Cá nhân'))} title="⚙️ Cài đặt cá nhân" />
+            {/* Menu hiển thị chức năng của nhóm*/}
+            <Menu.Item onPress={safeHandlePress(() => setShowMembersModal(true))} title="👥 Xem thành viên" />
+            <Menu.Item onPress={safeHandlePress(handleAddMembersToGroup)} title="➕ Thêm thành viên" />
+            <Menu.Item onPress={safeHandlePress(() => setShowRemoveMembersModal(true))} title="➖ Xóa thành viên" />
+            {currentUser?.uid === groupInfo?.admin && (
+              <Menu.Item onPress={safeHandlePress(deleteGroup)} title="🗑️ Xóa nhóm" titleStyle={{ color: 'red' }} />
+            )}
             {currentUser?.uid === groupInfo?.admin && (
               <Menu.Item onPress={safeHandlePress(() => console.log('👑 Chuyển quyền'))} title="👑 Chuyển quyền trưởng nhóm" />
             )}
@@ -1217,6 +1278,216 @@ export default function ChatGroup({ route, navigation }) {
               <Text style={styles.progressText}>Đang tải lên... {uploadProgress}%</Text>
             </View>
           </View>
+        )}
+
+        {/* Modal hiển thị danh sách thành viên (chỉ xem, không có nút xóa) */}
+        <Modal
+          visible={showMembersModal}
+          transparent={true}
+          animationType="slide"
+          onRequestClose={() => setShowMembersModal(false)}
+        >
+          <TouchableOpacity
+            style={styles.modalOverlay}
+            activeOpacity={1}
+            onPressOut={() => setShowMembersModal(false)}
+          >
+            <View style={styles.membersModalContent}>
+              <Text style={styles.membersModalTitle}>Danh sách thành viên</Text>
+              {members.length > 0 ? (
+                <FlatList
+                  data={members}
+                  keyExtractor={item => item.id}
+                  renderItem={({ item }) => (
+                    <View style={styles.memberItem}>
+                      <View style={styles.avatarCircle}>
+                        {item.avatar ? (
+                          <Image source={{ uri: item.avatar }} style={styles.avatarImage} />
+                        ) : (
+                          <Icon name="user-circle" size={30} color="#ccc" />
+                        )}
+                      </View>
+                      <Text style={styles.memberName}>
+                        {item.fullName || item.name || item.email}
+                        {item.id === groupInfo?.admin && (
+                          <Text style={styles.adminText}> (Trưởng nhóm)</Text>
+                        )}
+                      </Text>
+                    </View>
+                  )}
+                />
+              ) : (
+                <Text style={styles.emptyMembersText}>Không có thành viên nào.</Text>
+              )}
+              <TouchableOpacity
+                style={styles.closeMembersModalButton}
+                onPress={() => setShowMembersModal(false)}
+              >
+                <Text style={styles.closeMembersModalButtonText}>Đóng</Text>
+              </TouchableOpacity>
+            </View>
+          </TouchableOpacity>
+        </Modal>
+
+        {/* Modal thêm thành viên */}
+        <Modal
+          visible={showAddMembersModal}
+          transparent={true}
+          animationType="slide"
+          onRequestClose={() => setShowAddMembersModal(false)}
+        >
+          <View style={styles.addMembersModalContainer}>
+            <View style={styles.addMembersModalHeader}>
+              <Text style={styles.addMembersModalTitle}>Thêm thành viên vào nhóm</Text>
+              <TouchableOpacity onPress={safeHandlePress(() => setShowAddMembersModal(false))}>
+                <Icon name="close" size={24} color="#333" />
+              </TouchableOpacity>
+            </View>
+
+            <TextInput
+              style={styles.friendSearchInput}
+              placeholder="Tìm bạn bè..."
+              placeholderTextColor="#a0a0a0"
+              value={friendSearch}
+              onChangeText={setFriendSearch}
+            />
+
+            {isLoadingFriends ? (
+              <ActivityIndicator size="small" color="#27548A" style={{ marginTop: 20 }} />
+            ) : (
+              <FlatList
+                data={availableFriends.filter(friend => 
+                  friend.fullName?.toLowerCase().includes(friendSearch.toLowerCase()) ||
+                  friend.name?.toLowerCase().includes(friendSearch.toLowerCase()) ||
+                  friend.email?.toLowerCase().includes(friendSearch.toLowerCase())
+                )}
+                keyExtractor={(item) => item.user_id}
+                renderItem={({ item }) => (
+                  <TouchableOpacity
+                    style={styles.addMemberItem}
+                    onPress={safeHandlePress(() => toggleFriendSelection(item))}
+                  >
+                    <View style={styles.avatarCircleSmall}>
+                      {item.avatar ? (
+                        <Image source={{ uri: item.avatar }} style={styles.avatarImage} />
+                      ) : (
+                        <Icon name="user-circle" size={24} color="#ccc" />
+                      )}
+                    </View>
+                    <Text style={styles.addMemberName}>{item.fullName || item.name || item.email}</Text>
+                    {isFriendSelected(item.user_id) && (
+                      <Ionicons name="checkbox" size={24} color="#27548A" />
+                    )}
+                  </TouchableOpacity>
+                )}
+                ListEmptyComponent={<Text style={styles.emptyFriendsText}>Không tìm thấy bạn bè phù hợp.</Text>}
+              />
+            )}
+
+            <TouchableOpacity
+              style={[styles.addMembersButton, selectedFriends.length === 0 && styles.disabledButton]}
+              onPress={safeHandlePress(confirmAddMembers)}
+              disabled={selectedFriends.length === 0 || isAddingMembers}
+            >
+              <Text style={styles.addMembersButtonText}>
+                {isAddingMembers ? 'Đang thêm...' : `Thêm ${selectedFriends.length} thành viên`}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </Modal>
+
+        {/* Modal xóa thành viên */}
+        <Modal
+          visible={showRemoveMembersModal}
+          transparent={true}
+          animationType="slide"
+          onRequestClose={() => setShowRemoveMembersModal(false)}
+        >
+          <TouchableOpacity
+            style={styles.modalOverlay}
+            activeOpacity={1}
+            onPressOut={() => setShowRemoveMembersModal(false)}
+          >
+            <View style={styles.membersModalContent}>
+              <Text style={styles.membersModalTitle}>Xóa thành viên khỏi nhóm</Text>
+              {members.length > 0 ? (
+                <FlatList
+                  data={members}
+                  keyExtractor={item => item.id}
+                  renderItem={({ item }) => (
+                    <View style={styles.memberItem}>
+                      <View style={styles.avatarCircle}>
+                        {item.avatar ? (
+                          <Image source={{ uri: item.avatar }} style={styles.avatarImage} />
+                        ) : (
+                          <Icon name="user-circle" size={30} color="#ccc" />
+                        )}
+                      </View>
+                      <Text style={styles.memberName}>
+                        {item.fullName || item.name || item.email}
+                        {item.id === groupInfo?.admin && (
+                          <Text style={styles.adminText}> (Trưởng nhóm)</Text>
+                        )}
+                      </Text>
+                      {/* Nút xóa thành viên chỉ hiển thị cho admin, không cho phép xóa chính mình hoặc admin */}
+                      {currentUser?.uid === groupInfo?.admin && item.id !== groupInfo?.admin && item.id !== currentUser?.uid && (
+                        <TouchableOpacity
+                          style={{ marginLeft: 8, padding: 6 }}
+                          onPress={safeHandlePress(() => removeMemberFromGroup(item.id))}
+                        >
+                          <Icon name="user-times" size={22} color="#ff3b30" />
+                        </TouchableOpacity>
+                      )}
+                    </View>
+                  )}
+                />
+              ) : (
+                <Text style={styles.emptyMembersText}>Không có thành viên nào.</Text>
+              )}
+              <TouchableOpacity
+                style={styles.closeMembersModalButton}
+                onPress={() => setShowRemoveMembersModal(false)}
+              >
+                <Text style={styles.closeMembersModalButtonText}>Đóng</Text>
+              </TouchableOpacity>
+            </View>
+          </TouchableOpacity>
+        </Modal>
+
+        {showDeleteGroupModal && (
+          <Modal
+            visible={showDeleteGroupModal}
+            transparent={true}
+            animationType="fade"
+            onRequestClose={() => setShowDeleteGroupModal(false)}
+          >
+            <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.5)' }}>
+              <View style={{ backgroundColor: '#fff', borderRadius: 12, padding: 24, width: 320, alignItems: 'center' }}>
+                <Text style={{ fontSize: 18, fontWeight: 'bold', marginBottom: 12, color: '#d32f2f' }}>Xác nhận xóa nhóm</Text>
+                <Text style={{ fontSize: 15, color: '#333', marginBottom: 24, textAlign: 'center' }}>
+                  Bạn có chắc chắn muốn xóa nhóm này? Hành động này không thể hoàn tác!
+                </Text>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', width: '100%' }}>
+                  <TouchableOpacity
+                    style={{ flex: 1, padding: 12, backgroundColor: '#eee', borderRadius: 8, marginRight: 8, alignItems: 'center' }}
+                    onPress={() => { setShowDeleteGroupModal(false); }}
+                  >
+                    <Text style={{ color: '#333', fontWeight: 'bold' }}>Hủy</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={{ flex: 1, padding: 12, backgroundColor: '#d32f2f', borderRadius: 8, alignItems: 'center' }}
+                    onPress={async () => {
+                      setShowDeleteGroupModal(false);
+                      console.log('Đã bấm xác nhận xóa nhóm');
+                      await handleDeleteGroupConfirmed();
+                    }}
+                  >
+                    <Text style={{ color: '#fff', fontWeight: 'bold' }}>Xóa</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </View>
+          </Modal>
         )}
       </View>
     </Provider>
@@ -1760,5 +2031,144 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     marginLeft: 4,
+  },
+  membersModalContent: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    padding: 20,
+    minWidth: 300,
+    maxHeight: '70%',
+    elevation: 5,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.2,
+    shadowRadius: 5,
+  },
+  membersModalTitle: {
+    fontWeight: 'bold',
+    fontSize: 18,
+    marginBottom: 15,
+    textAlign: 'center',
+    color: '#333',
+  },
+  memberItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  avatarCircle: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#e0e0e0',
+    justifyContent: 'center',
+    alignItems: 'center',
+    overflow: 'hidden',
+  },
+  avatarImage: {
+    width: '100%',
+    height: '100%',
+    resizeMode: 'cover',
+  },
+  memberName: {
+    marginLeft: 12,
+    fontSize: 16,
+    color: '#333',
+    flex: 1, // Allow name to take up space
+  },
+  adminText: {
+    color: '#e6b800',
+    fontWeight: 'bold',
+    fontSize: 14, // Slightly smaller for distinction
+  },
+  emptyMembersText: {
+    textAlign: 'center',
+    color: '#666',
+    marginTop: 10,
+    marginBottom: 10,
+  },
+  closeMembersModalButton: {
+    marginTop: 20,
+    alignSelf: 'flex-end', // Align to the right
+    paddingHorizontal: 15,
+    paddingVertical: 10,
+    backgroundColor: '#f0f0f0',
+    borderRadius: 8,
+  },
+  closeMembersModalButtonText: {
+    color: '#27548A',
+    fontWeight: 'bold',
+    fontSize: 15,
+  },
+  addMembersModalContainer: {
+    flex: 1,
+    backgroundColor: '#fff',
+    padding: 16,
+    paddingTop: Platform.OS === 'ios' ? 40 : 16,
+  },
+  addMembersModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+    paddingBottom: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#eee',
+  },
+  addMembersModalTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333',
+  },
+  friendSearchInput: {
+    fontSize: 16,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 8,
+    marginBottom: 12,
+    color: '#333',
+  },
+  addMemberItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  avatarCircleSmall: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#e0e0e0',
+    justifyContent: 'center',
+    alignItems: 'center',
+    overflow: 'hidden',
+    marginRight: 12,
+  },
+  addMemberName: {
+    fontSize: 16,
+    color: '#333',
+    flex: 1,
+  },
+  emptyFriendsText: {
+    textAlign: 'center',
+    color: '#666',
+    marginTop: 20,
+  },
+  addMembersButton: {
+    backgroundColor: '#27548A',
+    padding: 14,
+    borderRadius: 8,
+    alignItems: 'center',
+    marginTop: 20,
+  },
+  addMembersButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
   },
 });
