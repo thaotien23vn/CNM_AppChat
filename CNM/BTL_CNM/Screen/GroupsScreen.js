@@ -24,23 +24,23 @@ export default function GroupsScreen({ navigation }) {
   const currentUser = auth.currentUser;
 
   // Đưa fetchGroups ra ngoài để dùng cho useFocusEffect
-    const fetchGroups = async () => {
-      try {
-        const q = query(
-          collection(db, 'Conversations'),
-          where('members', 'array-contains', currentUser.uid),
-          where('is_group', '==', true)
-        );
-        const querySnapshot = await getDocs(q);
-        const groupsData = querySnapshot.docs.map(doc => doc.data());
-        setGroups(groupsData);
-      } catch (error) {
-        console.error('Error fetching groups:', error);
-        Alert.alert('Lỗi', 'Không thể tải danh sách nhóm');
-      } finally {
-        setIsLoading(false);
-      }
-    };
+  const fetchGroups = async () => {
+    try {
+      const q = query(
+        collection(db, 'Conversations'),
+        where('members', 'array-contains', currentUser.uid),
+        where('is_group', '==', true)
+      );
+      const querySnapshot = await getDocs(q);
+      const groupsData = querySnapshot.docs.map(doc => doc.data());
+      setGroups(groupsData);
+    } catch (error) {
+      console.error('Error fetching groups:', error);
+      Alert.alert('Lỗi', 'Không thể tải danh sách nhóm');
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   useFocusEffect(
     React.useCallback(() => {
@@ -49,7 +49,7 @@ export default function GroupsScreen({ navigation }) {
         return;
       }
       setIsLoading(true);
-    fetchGroups();
+      fetchGroups();
     }, [currentUser])
   );
 
