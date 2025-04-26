@@ -34,6 +34,7 @@ import uuid from 'react-native-uuid';
 import VideoPlayer from '../components/RenderFileMessage';
 import { pickDocument } from '../utils/platformUtils';
 import { conversationApi } from '../Firebase/FirebaseApi';
+import { messageApi } from '../Firebase/FirebaseApi';
 
 // Set moment to use English locale
 moment.locale('en-gb');
@@ -730,15 +731,12 @@ export default function ChatGroup({ route, navigation }) {
         }
 
         // Thêm tin nhắn hệ thống thông báo người dùng đã rời nhóm
-        await addDoc(collection(db, MESSAGE_COLLECTION), {
+        await messageApi.sendMessage({
           con_id: groupId,
-          sender_id: 'system',
           content: `${user?.fullName || currentUser.email} đã rời khỏi nhóm`,
-          type: 'system',
-          createdAt: Date.now(),
-          timestamp: Date.now(),
-          isRevoked: false,
-          seen: false
+          sender_id: "system",
+          type: "notification",
+          action: "leave"
         });
 
         Alert.alert('Thành công', 'Bạn đã rời khỏi nhóm.');
@@ -1007,15 +1005,12 @@ export default function ChatGroup({ route, navigation }) {
       for (const friend of selectedFriends) {
         await conversationApi.addMemberToGroup(groupId, friend.user_id);
         // Gửi tin nhắn hệ thống sau khi thêm thành viên
-        await addDoc(collection(db, MESSAGE_COLLECTION), {
+        await messageApi.sendMessage({
           con_id: groupId,
           content: `${friend.fullName || friend.name || 'Một thành viên mới'} đã được thêm vào nhóm`,
           sender_id: "system",
-          type: "system",
-          createdAt: Date.now(),
-          timestamp: Date.now(),
-          isRevoked: false,
-          seen: false
+          type: "notification",
+          action: "add"
         });
       }
       setShowAddMembersModal(false);
@@ -1040,15 +1035,12 @@ export default function ChatGroup({ route, navigation }) {
     try {
       await conversationApi.removeMemberFromGroup(groupId, memberId);
       setMembers(prev => prev.filter(member => member.id !== memberId));
-      await addDoc(collection(db, MESSAGE_COLLECTION), {
+      await messageApi.sendMessage({
         con_id: groupId,
         content: `${memberName} đã bị xóa khỏi nhóm`,
         sender_id: "system",
         type: "system",
-        createdAt: Date.now(),
-        timestamp: Date.now(),
-        isRevoked: false,
-        seen: false
+        action: "remove"
       });
       // Cập nhật lại groupInfo (nếu cần)
       const groupDoc = await getDoc(doc(db, 'Conversations', groupId));
@@ -1070,6 +1062,7 @@ export default function ChatGroup({ route, navigation }) {
         content: 'Nhóm sẽ bị giải tán',
         sender_id: 'system',
         type: 'system',
+        action: 'disband', // Thêm action để chuẩn hóa system message
         createdAt: Date.now(),
         timestamp: Date.now(),
         isRevoked: false,
