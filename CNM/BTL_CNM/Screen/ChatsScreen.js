@@ -338,6 +338,106 @@ export default function ChatsScreen({ route }) {
         }
     };
 
+    // Lấy danh sách tất cả các cuộc trò chuyện cho tính năng chuyển tiếp
+    useEffect(() => {
+        if (!currentUserId) return;
+        
+        const fetchConversations = async () => {
+            try {
+                const userConversationsQuery = query(
+                    collection(db, 'UserConversation'), 
+                    where('user_id', '==', currentUserId)
+                );
+                const userConversationsSnapshot = await getDocs(userConversationsQuery);
+                
+                const conversationsData = [];
+                for (const docSnap of userConversationsSnapshot.docs) {
+                    const conId = docSnap.data().con_id;
+                    const conversationDoc = await getDoc(doc(db, 'Conversations', conId));
+                    
+                    if (conversationDoc.exists()) {
+                        const conData = conversationDoc.data();
+                        conversationsData.push({
+                            ...conData,
+                            con_id: conId
+                        });
+                    }
+                }
+                
+                setConversations(conversationsData);
+            } catch (error) {
+                console.error('Error fetching conversations:', error);
+            }
+        };
+        
+        fetchConversations();
+    }, [currentUserId]);
+
+    // Hàm mở modal chuyển tiếp tin nhắn
+    const openForwardModal = useCallback((message) => {
+        setForwardMessage(message);
+        setShowForwardModal(true);
+        setSelectedConversations([]);
+    }, []);
+
+    // Hàm xử lý trả lời tin nhắn
+    const handleReplyToMessage = (message) => {
+        setReplyToMessage(message);
+        setShowMoreOptions(false);
+    };
+
+    // Hàm chọn/bỏ chọn cuộc trò chuyện để chuyển tiếp
+    const toggleConversationSelection = useCallback((conversation) => {
+        setSelectedConversations(prev => {
+            const isSelected = prev.some(c => c.con_id === conversation.con_id);
+            return isSelected
+                ? prev.filter(c => c.con_id !== conversation.con_id)
+                : [...prev, conversation];
+        });
+    }, []);
+
+    // Hàm thực hiện việc chuyển tiếp tin nhắn
+    const handleSendForwardMessage = useCallback(async () => {
+        if (!forwardMessage || !selectedConversations.length) return;
+
+        try {
+            // Chuẩn bị dữ liệu tin nhắn dựa trên loại tin nhắn
+            const messageData = {
+                sender_id: currentUserId,
+                content: forwardMessage.content,
+                type: forwardMessage.type === 'image' || forwardMessage.type === 'video'
+                    ? forwardMessage.type
+                    : 'text',
+                createdAt: Date.now(),
+                timestamp: Date.now(),
+                isRevoked: false,
+                seen: false
+            };
+
+            // Thêm URL nếu là hình ảnh hoặc video
+            if (forwardMessage.type === 'image' || forwardMessage.type === 'video') {
+                messageData.url = forwardMessage.url;
+            }
+
+            // Gửi tin nhắn đến tất cả các cuộc trò chuyện đã chọn
+            await Promise.all(
+                selectedConversations.map(conv =>
+                    addDoc(collection(db, MESSAGE_COLLECTION), {
+                        ...messageData,
+                        con_id: conv.con_id
+                    })
+                )
+            );
+            setShowForwardModal(false);
+            setForwardMessage(null);
+            setSelectedConversations([]);
+            Alert.alert('Thành công', 'Tin nhắn đã được chuyển tiếp');
+        } catch (error) {
+            console.error('Lỗi khi chuyển tiếp tin nhắn:', error);
+            Alert.alert('Lỗi', 'Không thể chuyển tiếp tin nhắn. Vui lòng thử lại.');
+        }
+    }, [forwardMessage, selectedConversations, currentUserId]);
+
     // Hàm tải lên video
     const handleVideoPickerUpload = async () => {
         if (!conversationId) {
@@ -849,7 +949,83 @@ export default function ChatsScreen({ route }) {
                 </Modal>
             )}
 
-                      {/* Video Player */}
+            {/* Forward Modal */}
+            {showForwardModal && (
+                <Modal
+                    visible={showForwardModal}
+                    transparent={true}
+                    animationType="slide"
+                    onRequestClose={() => setShowForwardModal(false)}
+                >
+                    <View style={styles.forwardModalContainer}>
+                        <View style={styles.forwardModalHeader}>
+                            <Text style={styles.forwardModalTitle}>Forward Message</Text>
+                            <TouchableOpacity onPress={() => setShowForwardModal(false)}>
+                                <Icon name="close" size={24} color="#000" />
+                            </TouchableOpacity>
+                        </View>
+                        
+                        {/* Preview of message being forwarded */}
+                        <View style={styles.forwardPreviewContainer}>
+                            {forwardMessage?.type === 'image' ? (
+                                <Image source={{ uri: forwardMessage.url }} style={styles.forwardImagePreview} />
+                            ) : (
+                                <Text style={styles.forwardTextPreview} numberOfLines={2}>
+                                    {forwardMessage?.content}
+                                </Text>
+                            )}
+                        </View>
+                        
+                        <Text style={styles.forwardInstructionText}>Select conversations to forward to:</Text>
+                        
+                        {/* List of conversations */}
+                        <FlatList
+                            data={conversations}
+                            keyExtractor={(item) => item.con_id}
+                            style={styles.conversationsList}
+                            renderItem={({ item }) => {
+                                // Skip current conversation
+                                if (item.con_id === conversationId) return null;
+                                
+                                const isSelected = selectedConversations.some(c => c.con_id === item.con_id);
+                                return (
+                                    <TouchableOpacity 
+                                        style={[
+                                            styles.conversationItem,
+                                            isSelected && styles.selectedConversationItem
+                                        ]}
+                                        onPress={() => toggleConversationSelection(item)}
+                                    >
+                                        <Icon name={item.is_group ? "users" : "user"} size={24} color="#514869" />
+                                        <Text style={styles.conversationName}>
+                                            {item.name || 'Chat'}
+                                            {item.is_group ? ' (Group)' : ''}
+                                        </Text>
+                                        {isSelected && (
+                                            <Icon name="check-circle" size={24} color="#3f15d6" />
+                                        )}
+                                    </TouchableOpacity>
+                                );
+                            }}
+                        />
+                        
+                        <TouchableOpacity 
+                            style={[
+                                styles.forwardButton,
+                                selectedConversations.length === 0 && styles.disabledButton
+                            ]}
+                            disabled={selectedConversations.length === 0}
+                            onPress={handleSendForwardMessage}
+                        >
+                            <Text style={styles.forwardButtonText}>
+                                Forward to {selectedConversations.length} conversation{selectedConversations.length !== 1 ? 's' : ''}
+                            </Text>
+                        </TouchableOpacity>
+                    </View>
+                </Modal>
+            )}
+
+            {/* Video Player */}
             {showVideoPlayer && selectedVideo && (
                 <Modal
                     visible={showVideoPlayer}
