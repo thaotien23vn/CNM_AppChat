@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, FlatList, TouchableOpacity, StyleSheet, Alert, SafeAreaView, ActivityIndicator } from 'react-native';
+import { View, Text, FlatList, TouchableOpacity, StyleSheet, Alert, SafeAreaView, ActivityIndicator, Image } from 'react-native';
 import { db } from '../Firebase/Firebase';
 import { getAuth } from 'firebase/auth';
 import { user } from './UserContext';
@@ -14,37 +14,28 @@ import {
   doc,
   setDoc,
 } from 'firebase/firestore';
+import { friendApi } from '../Firebase/FirebaseApi';
+import { useNavigation } from '@react-navigation/native';
 
 export default function FriendRequestsScreen() {
   const [requests, setRequests] = useState([]);
   const [loading, setLoading] = useState(true);
   const auth = getAuth();
   const currentUser = auth.currentUser;
+  const navigation = useNavigation();
 
   useEffect(() => {
     if (!currentUser) return;
-
-    const fetchRequests = async () => {
-      setLoading(true);
-      try {
-        const q = query(collection(db, 'friend_requests'), where('to', '==', currentUser.uid), where('status', '==', 'pending'));
-        const snapshot = await getDocs(q);
-        const result = snapshot.docs.map(docSnap => ({
-          id: docSnap.id,
-          ...docSnap.data(),
-        }));
-        
-        setRequests(result);
-      } catch (err) {
-        console.error(err);
-        Alert.alert('Lỗi', 'Không thể lấy danh sách lời mời kết bạn.');
-      } finally {
-        setLoading(false);
-      }
+    setLoading(true);
+    // Sử dụng friendApi.getFriendRequests để lấy luôn userData
+    const unsubscribe = friendApi.getFriendRequests(currentUser.uid, (result) => {
+      setRequests(result);
+      setLoading(false);
+    });
+    return () => {
+      if (typeof unsubscribe === 'function') unsubscribe();
     };
-
-    fetchRequests();
-  }, []);
+  }, [currentUser]);
 
   const acceptRequest = async (request) => {
     try {
@@ -66,6 +57,8 @@ export default function FriendRequestsScreen() {
 
       Alert.alert('✅ Thành công', 'Bạn đã chấp nhận lời mời!');
       setRequests(prev => prev.filter(r => r.id !== request.id));
+      // Chuyển sang tab/màn hình "Contacts"
+      navigation.navigate('Contacts');
     } catch (error) {
       console.error(error);
       Alert.alert('Lỗi', 'Không thể chấp nhận lời mời.');
@@ -87,11 +80,15 @@ export default function FriendRequestsScreen() {
     <View style={styles.card}>
       <View style={styles.cardHeader}>
         <View style={styles.avatarContainer}>
-          <Icon name="user-circle" size={40} color="#3f15d6" />
+          {item.userData && item.userData.img ? (
+            <Image source={{ uri: item.userData.img }} style={{ width: 40, height: 40, borderRadius: 20 }} />
+          ) : (
+            <Icon name="user-circle" size={40} color="#3f15d6" />
+          )}
         </View>
         <View style={styles.userInfo}>
-          <Text style={styles.userName}>Người dùng</Text>
-          <Text style={styles.userEmail}>{item.from}</Text>
+          <Text style={styles.userName}>{item.userData ? (item.userData.fullName || item.userData.name || 'Người dùng') : 'Người dùng'}</Text>
+          <Text style={styles.userEmail}>{item.userData ? item.userData.email : item.from}</Text>
         </View>
       </View>
       

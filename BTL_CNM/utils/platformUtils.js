@@ -25,15 +25,19 @@ export const pickDocument = async (options = {}) => {
             }
             
             // Create a structure similar to Expo's DocumentPicker response
-            resolve({
-              canceled: false,
-              assets: [{
-                name: file.name,
-                size: file.size,
-                uri: URL.createObjectURL(file),
-                mimeType: file.type,
-              }]
-            });
+            const reader = new FileReader();
+            reader.onload = () => {
+              resolve({
+                canceled: false,
+                assets: [{
+                  name: file.name,
+                  size: file.size,
+                  uri: reader.result,
+                  mimeType: file.type,
+                }]
+              });
+            };
+            reader.readAsDataURL(file);
           };
           
           input.click();

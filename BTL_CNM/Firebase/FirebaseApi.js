@@ -271,11 +271,11 @@ export const conversationApi = {
                 }]
             });
 
-            // Thêm liên kết UserConversation cho thành viên mới
-            await addDoc(collection(db, 'UserConversation'), {
+            // Thêm liên kết UserConversation cho thành viên mới (dùng setDoc với id chuẩn)
+            await setDoc(doc(db, 'UserConversation', `${conversationId}_${memberId}`), {
                 user_id: memberId,
                 con_id: conversationId,
-                createdAt: serverTimestamp()
+                createdAt: new Date().toISOString()
             });
 
             return true;

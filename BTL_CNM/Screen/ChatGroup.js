@@ -53,6 +53,25 @@ const safeHandlePress = (callback) => {
   };
 };
 
+// Thêm hàm mở file an toàn cho cả web/native
+const handleOpenFileInternal = (url, name) => {
+  if (!url) return;
+  if (Platform.OS === 'web') {
+    if (url.startsWith('data:')) {
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = name || 'file';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    } else {
+      window.open(url, '_blank');
+    }
+  } else {
+    Linking.openURL(url);
+  }
+};
+
 export default function ChatGroup({ route, navigation }) {
   const { user } = useUser();
   const [messages, setMessages] = useState([]);
@@ -767,8 +786,12 @@ export default function ChatGroup({ route, navigation }) {
   const renderMessage = ({ item }) => {
     const isCurrentUser = item.sender_id === currentUser?.uid;
     const isSystem = item.sender_id === 'system';
-    const senderName = isCurrentUser ? 'Bạn' : getMemberName(item.sender_id);
     
+    // Đảm bảo members đã được load và có dữ liệu
+    const senderDetails = members && members.find(m => m.id === item.sender_id); // Thêm kiểm tra `members &&`
+    const senderAvatarUrl = senderDetails?.img; // <--- KHAI BÁO Ở ĐÂY
+    const senderName = isCurrentUser ? 'Bạn' : getMemberName(item.sender_id);
+
     // Format the timestamp to 12-hour format
     let timestamp = new Date(item.timestamp);
     let hours = timestamp.getHours();
@@ -797,12 +820,20 @@ export default function ChatGroup({ route, navigation }) {
 
     return (
       <View style={[styles.messageContainer, isCurrentUser ? styles.userMessageContainer : styles.friendMessageContainer]}>
-        {!isCurrentUser && (
-          <View style={styles.avatarContainer}>
-            <Icon name="user-circle" size={36} color="#514869" />
-            <Text style={styles.senderName} numberOfLines={1}>{senderName}</Text>
-          </View>
+      {!isCurrentUser && (
+      <View style={styles.avatarContainer}>
+        {senderAvatarUrl ? (
+          <Image 
+            source={{ uri: senderAvatarUrl }} 
+            style={styles.messageAvatar} // Style này bạn đã có border đỏ để debug
+            onError={(e) => console.log(`[ChatGroup] IMAGE LOAD ERROR (Friend) for ${senderAvatarUrl}:`, e.nativeEvent.error)}
+          />
+        ) : (
+          <Icon name="user-circle" size={36} color="#514869" />
         )}
+        <Text style={styles.senderName} numberOfLines={1}>{senderName}</Text>
+      </View>
+    )}
         
         <View style={styles.messageContentContainer}>
           <TouchableOpacity
@@ -865,12 +896,9 @@ export default function ChatGroup({ route, navigation }) {
                             </Text>
                           <TouchableOpacity 
                               style={styles.downloadButton}
-                                onPress={() => {
-                                  // Xử lý tải xuống/xem tệp
-                                  Linking.openURL(item.url);
-                                   }}
-                                      >
-                                    <Icon name="download" size={18} color="#3f15d6" />
+                              onPress={() => handleOpenFileInternal(item.url, item.content)}
+                          >
+                            <Icon name="download" size={18} color="#3f15d6" />
                           </TouchableOpacity>
                       </View>
                   )}
@@ -898,13 +926,22 @@ export default function ChatGroup({ route, navigation }) {
           )}
         </View>
 
-        {isCurrentUser && (
-          <View style={styles.avatarContainer}>
+        {/* === AVATAR CHO TIN NHẮN CỦA BẠN (ĐÃ DI CHUYỂN VÀO ĐÂY) === */}
+      {isCurrentUser && (
+        <View style={styles.avatarContainer}>
+          {user?.img ? ( 
+            <Image 
+              source={{ uri: user.img }} 
+              style={styles.messageAvatar} // Style này bạn đã có border đỏ để debug
+              onError={(e) => console.log(`[ChatGroup] IMAGE LOAD ERROR (Current User) for ${user.img}:`, e.nativeEvent.error)}
+            />
+          ) : (
             <Icon name="user-circle" size={36} color="#27548A" />
-          </View>
-        )}
-      </View>
-    );
+          )}
+        </View>
+      )}
+    </View>
+  );
   };
 
   // Animation update without useNativeDriver
@@ -972,7 +1009,7 @@ export default function ChatGroup({ route, navigation }) {
       
       setAvailableFriends(availableFriendsToAdd);
       setShowAddMembersModal(true);
-      setShowMembersModal(false); // Close view members modal if open
+      setShowMembersModal(false);     
     } catch (error) {
       console.error('Lỗi khi lấy danh sách bạn bè:', error);
       Alert.alert('Lỗi', 'Không thể lấy danh sách bạn bè');
@@ -1813,16 +1850,16 @@ export default function ChatGroup({ route, navigation }) {
                     ]}
                     onPress={() => setSelectedNewAdmin(item.id)}
                   >
-                    <View style={styles.avatarCircle}>
+                    <View style={styles.avatarCircleSmall}>
                       {item.avatar ? (
                         <Image source={{ uri: item.avatar }} style={styles.avatarImage} />
                       ) : (
-                        <Icon name="user-circle" size={30} color="#ccc" />
+                        <Icon name="user-circle" size={24} color="#ccc" />
                       )}
                     </View>
-                    <Text style={styles.memberName}>{item.fullName || item.name || item.email}</Text>
-                    {selectedNewAdmin === item.id && (
-                      <Ionicons name="checkmark-circle" size={22} color="#27548A" />
+                    <Text style={styles.addMemberName}>{item.fullName || item.name || item.email}</Text>
+                    {isFriendSelected(item.user_id) && (
+                      <Ionicons name="checkbox" size={24} color="#27548A" />
                     )}
                   </TouchableOpacity>
                 )}
@@ -2403,38 +2440,39 @@ const styles = StyleSheet.create({
   },
   fileTypeLabel: {
     position: 'absolute',
-    top: 10,
-    right: 10,
-    backgroundColor: 'rgba(0, 0, 0, 0.6)',
-    color: '#FFF',
-    fontSize: 12,
-    paddingVertical: 4,
+    bottom: 8,
+    right: 8,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    color: '#fff',
+    padding: 4,
     paddingHorizontal: 8,
-    borderRadius: 12,
-    overflow: 'hidden',
+    borderRadius: 4,
+    fontSize: 12,
   },
   fileContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(39, 84, 138, 0.08)',
-    borderRadius: 16,
+    backgroundColor: '#f0f2f5',
+    borderRadius: 10,
     padding: 12,
-    marginVertical: 2,
+    paddingRight: 8,
+    minWidth: 180,
+    maxWidth: 250,
   },
   fileName: {
     flex: 1,
+    marginLeft: 10,
     fontSize: 14,
     color: '#333',
-    marginLeft: 10,
-    fontWeight: '500',
   },
   downloadButton: {
     width: 36,
     height: 36,
+    borderRadius: 18,
+    backgroundColor: '#e4e6eb',
     justifyContent: 'center',
     alignItems: 'center',
-    borderRadius: 18,
-    backgroundColor: 'rgba(39, 84, 138, 0.1)',
+    marginLeft: 8,
   },
   bottomToolbar: {
     flexDirection: 'row',
@@ -2609,5 +2647,13 @@ const styles = StyleSheet.create({
     borderColor: '#fff',
     marginRight: 14,
     backgroundColor: '#e0e0e0',
+  },
+  messageAvatar: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#e0e0e0', // Màu nền tạm
+    borderWidth: 2,             // THÊM DÒNG NÀY
+    borderColor: 'white',         // THÊM DÒNG NÀY
   },
 });

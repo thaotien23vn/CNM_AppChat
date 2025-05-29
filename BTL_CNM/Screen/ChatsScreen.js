@@ -15,6 +15,7 @@ import FilePicker from '../components/FilePicker';
 import AttachmentMenu from '../components/AttachmentMenu';
 import VideoPlayer from '../components/RenderFileMessage';
 import { pickDocument } from '../utils/platformUtils';
+import RenderFileMessage from '../components/RenderFileMessage';
 
 const MESSAGE_COLLECTION = 'Messages';
 
@@ -69,127 +70,125 @@ export default function ChatsScreen({ route }) {
         setIsUploading(false);
         setUploadProgress(0);
     };
-
     useEffect(() => {
-        const findOrCreateConversation = async () => {
-            // Kiểm tra xem hai ID người dùng đã được định nghĩa chưa trước khi tiếp tục
-            if (!currentUserId || !chatWithUserId) {
-                console.log('Missing user IDs, cannot create conversation');
-                return;
-            }
-            
-            // Tìm kiếm cuộc trò chuyện hiện có giữa hai người dùng
-            const q = query(collection(db, 'UserConversation'), where('user_id', '==', currentUserId));
-            const snapshot = await getDocs(q);
-            let found = null;
-            for (const docSnap of snapshot.docs) {
-                const con_id = docSnap.data().con_id;
-                const checkQ = query(collection(db, 'UserConversation'), where('con_id', '==', con_id), where('user_id', '==', chatWithUserId));
-                const checkSnap = await getDocs(checkQ);
-                if (!checkSnap.empty) {
-                    found = con_id;
-                    break;
-                }
-            }
-            // Nếu không tìm thấy cuộc trò chuyện, tạo mới
-            if (!found) {
-                const newConId = `con_${uuid.v4()}`;
-                await addDoc(collection(db, 'UserConversation'), { con_id: newConId, user_id: currentUserId });
-                await addDoc(collection(db, 'UserConversation'), { con_id: newConId, user_id: chatWithUserId });
-                await setDoc(doc(db, 'Conversations', newConId), {
-                    con_id: newConId,
-                    admin: currentUserId,
-                    is_group: false,
-                    members: [currentUserId, chatWithUserId],
-                    mess_info: [],
-                    name: '',
-                    time: Date.now()
-                });
-                setConversationId(newConId);
-            } else {
-                setConversationId(found);
-            }
-        };
-        findOrCreateConversation();
-    }, [currentUserId, chatWithUserId]);
+      const findOrCreateConversation = async () => {
+          // Kiểm tra xem hai ID người dùng đã được định nghĩa chưa trước khi tiếp tục
+          if (!currentUserId || !chatWithUserId) {
+              console.log('Missing user IDs, cannot create conversation');
+              return;
+          }
+          
+          // Tìm kiếm cuộc trò chuyện hiện có giữa hai người dùng
+          const q = query(collection(db, 'UserConversation'), where('user_id', '==', currentUserId));
+          const snapshot = await getDocs(q);
+          let found = null;
+          for (const docSnap of snapshot.docs) {
+              const con_id = docSnap.data().con_id;
+              const checkQ = query(collection(db, 'UserConversation'), where('con_id', '==', con_id), where('user_id', '==', chatWithUserId));
+              const checkSnap = await getDocs(checkQ);
+              if (!checkSnap.empty) {
+                  found = con_id;
+                  break;
+              }
+          }
+          // Nếu không tìm thấy cuộc trò chuyện, tạo mới
+          if (!found) {
+              const newConId = `con_${uuid.v4()}`;
+              await addDoc(collection(db, 'UserConversation'), { con_id: newConId, user_id: currentUserId });
+              await addDoc(collection(db, 'UserConversation'), { con_id: newConId, user_id: chatWithUserId });
+              await setDoc(doc(db, 'Conversations', newConId), {
+                  con_id: newConId,
+                  admin: currentUserId,
+                  is_group: false,
+                  members: [currentUserId, chatWithUserId],
+                  mess_info: [],
+                  name: '',
+                  time: Date.now()
+              });
+              setConversationId(newConId);
+          } else {
+              setConversationId(found);
+          }
+      };
+      findOrCreateConversation();
+  }, [currentUserId, chatWithUserId]);
 
-    useEffect(() => {
-        if (!conversationId) return;
-        // Lắng nghe sự thay đổi tin nhắn từ Firestore
-        const q = query(collection(db, MESSAGE_COLLECTION), where('con_id', '==', conversationId));
-        const unsubscribe = onSnapshot(q, (snapshot) => {
-            const msgs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-            // Sắp xếp tin nhắn theo thời gian tạo
-            const sorted = msgs.sort((a, b) => a.createdAt - b.createdAt);
-            setMessages(sorted);
-            
-            // Đánh dấu tin nhắn từ người dùng khác là đã xem
-            markMessagesAsSeen(sorted);
-            
-            // Hiệu ứng mờ dần cho mỗi tin nhắn mới
-            Animated.timing(fadeAnim, { toValue: 1, duration: 300, useNativeDriver: true }).start();
-            setTimeout(() => {
-                if (flatListRef.current) {
-                    flatListRef.current.scrollToEnd({ animated: true });
-                }
-            }, 100);
-        });
-        return () => unsubscribe();
-    }, [conversationId]);
+  useEffect(() => {
+      if (!conversationId) return;
+      // Lắng nghe sự thay đổi tin nhắn từ Firestore
+      const q = query(collection(db, MESSAGE_COLLECTION), where('con_id', '==', conversationId));
+      const unsubscribe = onSnapshot(q, (snapshot) => {
+          const msgs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+          // Sắp xếp tin nhắn theo thời gian tạo
+          const sorted = msgs.sort((a, b) => a.createdAt - b.createdAt);
+          setMessages(sorted);
+          
+          // Đánh dấu tin nhắn từ người dùng khác là đã xem
+          markMessagesAsSeen(sorted);
+          
+          // Hiệu ứng mờ dần cho mỗi tin nhắn mới
+          Animated.timing(fadeAnim, { toValue: 1, duration: 300, useNativeDriver: true }).start();
+          setTimeout(() => {
+              if (flatListRef.current) {
+                  flatListRef.current.scrollToEnd({ animated: true });
+              }
+          }, 100);
+      });
+      return () => unsubscribe();
+  }, [conversationId]);
 
-    // Hàm đánh dấu các tin nhắn là đã xem
-    const markMessagesAsSeen = async (messages) => {
-        if (!conversationId || !currentUserId || !chatWithUserId) return;
-        
-        // Lấy các tin nhắn từ người dùng khác mà chưa được xem
-        const unseenMessages = messages.filter(
-            msg => msg.sender_id === chatWithUserId && !msg.seen
-        );
-        
-        // Cập nhật từng tin nhắn để đánh dấu là đã xem
-        for (const message of unseenMessages) {
-            try {
-                await updateDoc(doc(db, MESSAGE_COLLECTION, message.id), {
-                    seen: true,
-                    seenAt: Date.now(),
-                    seenBy: currentUserId
-                });
-            } catch (error) {
-                console.error('Error marking message as seen:', error);
-            }
-        }
-    };
+  // Hàm đánh dấu các tin nhắn là đã xem
+  const markMessagesAsSeen = async (messages) => {
+      if (!conversationId || !currentUserId || !chatWithUserId) return;
+      
+      // Lấy các tin nhắn từ người dùng khác mà chưa được xem
+      const unseenMessages = messages.filter(
+          msg => msg.sender_id === chatWithUserId && !msg.seen
+      );
+      
+      // Cập nhật từng tin nhắn để đánh dấu là đã xem
+      for (const message of unseenMessages) {
+          try {
+              await updateDoc(doc(db, MESSAGE_COLLECTION, message.id), {
+                  seen: true,
+                  seenAt: Date.now(),
+                  seenBy: currentUserId
+              });
+          } catch (error) {
+              console.error('Error marking message as seen:', error);
+          }
+      }
+  };
 
-    // Hàm gửi tin nhắn văn bản
-    const sendMessage = async () => {
-        if (inputText.trim() && conversationId) {
-            const messageData = {
-                con_id: conversationId,
-                sender_id: currentUserId,
-                content: inputText,
-                type: 'text',
-                createdAt: Date.now(),
-                timestamp: Date.now(),
-                isRevoked: false,
-                seen: false
-            };
-            
-            // Thêm thông tin trả lời nếu đang trả lời một tin nhắn
-            if (replyToMessage) {
-                messageData.replyTo = {
-                    id: replyToMessage.id,
-                    content: replyToMessage.content,
-                    type: replyToMessage.type,
-                    sender_id: replyToMessage.sender_id
-                };
-            }
-            
-            await addDoc(collection(db, MESSAGE_COLLECTION), messageData);
-            setInputText('');
-            setReplyToMessage(null); // Xóa tin nhắn trả lời sau khi gửi
-        }
-    };
-
+  // Hàm gửi tin nhắn văn bản
+  const sendMessage = async () => {
+      if (inputText.trim() && conversationId) {
+          const messageData = {
+              con_id: conversationId,
+              sender_id: currentUserId,
+              content: inputText,
+              type: 'text',
+              createdAt: Date.now(),
+              timestamp: Date.now(),
+              isRevoked: false,
+              seen: false
+          };
+          
+          // Thêm thông tin trả lời nếu đang trả lời một tin nhắn
+          if (replyToMessage) {
+              messageData.replyTo = {
+                  id: replyToMessage.id,
+                  content: replyToMessage.content,
+                  type: replyToMessage.type,
+                  sender_id: replyToMessage.sender_id
+              };
+          }
+          
+          await addDoc(collection(db, MESSAGE_COLLECTION), messageData);
+          setInputText('');
+          setReplyToMessage(null); // Xóa tin nhắn trả lời sau khi gửi
+      }
+  };
     // Hàm bắt/tắt menu đính kèm
     const toggleAttachmentMenu = () => {
         setShowAttachmentMenu(!showAttachmentMenu);
@@ -636,81 +635,81 @@ export default function ChatsScreen({ route }) {
 
     // Hàm xử lý tải lên tệp đính kèm
     const handleFilePickerUpload = async () => {
-        if (!conversationId) {
-            Alert.alert('Lỗi', 'Không thể xác định cuộc trò chuyện.');
-            return;
-        }
+      if (!conversationId) {
+          Alert.alert('Lỗi', 'Không thể xác định cuộc trò chuyện.');
+          return;
+      }
 
-        try {
-            // Sử dụng trình chọn tài liệu an toàn cho nền tảng
-            const result = await pickDocument();
+      try {
+          // Sử dụng trình chọn tài liệu an toàn cho nền tảng
+          const result = await pickDocument();
 
-            if (result.canceled) {
-                console.log('User cancelled file picker');
-                return;
-            }
+          if (result.canceled) {
+              console.log('User cancelled file picker');
+              return;
+          }
 
-            if (!result.assets || result.assets.length === 0) {
-                console.log('No file selected');
-                return;
-            }
+          if (!result.assets || result.assets.length === 0) {
+              console.log('No file selected');
+              return;
+          }
 
-            const asset = result.assets[0];
-            
-            // Kiểm tra kích thước tệp (giới hạn 20MB)
-            if (asset.size > 20 * 1024 * 1024) {
-                Alert.alert('File quá lớn', 'Vui lòng chọn file nhỏ hơn 20MB.');
-                return;
-            }
+          const asset = result.assets[0];
+          
+          // Kiểm tra kích thước tệp (giới hạn 20MB)
+          if (asset.size > 20 * 1024 * 1024) {
+              Alert.alert('File quá lớn', 'Vui lòng chọn file nhỏ hơn 20MB.');
+              return;
+          }
 
-            setIsUploading(true);
-            handleFileUploadStart();
-            
-            // Giả lập cập nhật tiến trình
-            let progress = 0;
-            const progressInterval = setInterval(() => {
-                progress = Math.min(95, progress + 5);
-                handleProgress(progress);
-            }, 500);
+          setIsUploading(true);
+          handleFileUploadStart();
+          
+          // Giả lập cập nhật tiến trình
+          let progress = 0;
+          const progressInterval = setInterval(() => {
+              progress = Math.min(95, progress + 5);
+              handleProgress(progress);
+          }, 500);
 
-            // Xác định phần mở rộng tệp
-            const fileExtension = asset.name.split('.').pop() || '';
-            const fileName = `${uuid.v4()}-${asset.name}`;
-            const fileRef = ref(getStorage(), `files/${currentUserId}/${fileName}`);
+          // Xác định phần mở rộng tệp
+          const fileExtension = asset.name.split('.').pop() || '';
+          const fileName = `${uuid.v4()}-${asset.name}`;
+          const fileRef = ref(getStorage(), `files/${currentUserId}/${fileName}`);
 
-            const responseBlob = await fetch(asset.uri);
-            const blob = await responseBlob.blob();
+          const responseBlob = await fetch(asset.uri);
+          const blob = await responseBlob.blob();
 
-            // Tải tệp lên Firebase Storage
-            await uploadBytes(fileRef, blob);
-            clearInterval(progressInterval);
-            handleProgress(100);
+          // Tải tệp lên Firebase Storage
+          await uploadBytes(fileRef, blob);
+          clearInterval(progressInterval);
+          handleProgress(100);
 
-            const downloadURL = await getDownloadURL(fileRef);
+          const downloadURL = await getDownloadURL(fileRef);
 
-            // Thêm tin nhắn tệp vào Firestore
-            await addDoc(collection(db, MESSAGE_COLLECTION), {
-                con_id: conversationId,
-                sender_id: currentUserId,
-                receiver_id: chatWithUserId,
-                content: asset.name,
-                type: 'file',
-                url: downloadURL,
-                createdAt: Date.now(),
-                timestamp: Date.now(),
-                isRevoked: false,
-                seen: false
-            });
+          // Thêm tin nhắn tệp vào Firestore
+          await addDoc(collection(db, MESSAGE_COLLECTION), {
+              con_id: conversationId,
+              sender_id: currentUserId,
+              receiver_id: chatWithUserId,
+              content: asset.name,
+              type: 'file',
+              url: downloadURL,
+              createdAt: Date.now(),
+              timestamp: Date.now(),
+              isRevoked: false,
+              seen: false
+          });
 
-            console.log('File uploaded successfully');
-        } catch (error) {
-            console.error('Error uploading file:', error);
-            Alert.alert('Lỗi', 'Không thể tải lên file. Vui lòng thử lại.');
-        } finally {
-            setIsUploading(false);
-            handleFileUploadEnd();
-        }
-    };
+          console.log('File uploaded successfully');
+      } catch (error) {
+          console.error('Error uploading file:', error);
+          Alert.alert('Lỗi', 'Không thể tải lên file. Vui lòng thử lại.');
+      } finally {
+          setIsUploading(false);
+          handleFileUploadEnd();
+      }
+  };
 
     // Hàm mở trình phát video
     const openVideoPlayer = (message) => {
@@ -726,52 +725,52 @@ export default function ChatsScreen({ route }) {
 
     // Fetch user info for all senders when messages change
     useEffect(() => {
-        const fetchAllSenders = async () => {
-            const senderIds = [...new Set(messages.map(m => m.sender_id))];
-            const missingIds = senderIds.filter(id => !userCache[id]);
-            if (missingIds.length === 0) return;
-            const newCache = { ...userCache };
-            for (const id of missingIds) {
-                try {
-                    const userDoc = await getDoc(doc(db, 'Users', id));
-                    if (userDoc.exists()) newCache[id] = userDoc.data();
-                } catch (e) {}
-            }
-            setUserCache(newCache);
-        };
-        fetchAllSenders();
-        // eslint-disable-next-line
-    }, [messages]);
-
+      const fetchAllSenders = async () => {
+          const senderIds = [...new Set(messages.map(m => m.sender_id))];
+          const missingIds = senderIds.filter(id => !userCache[id]);
+          if (missingIds.length === 0) return;
+          const newCache = { ...userCache };
+          for (const id of missingIds) {
+              try {
+                  const userDoc = await getDoc(doc(db, 'Users', id));
+                  if (userDoc.exists()) newCache[id] = userDoc.data();
+              } catch (e) {}
+          }
+          setUserCache(newCache);
+      };
+      fetchAllSenders();
+      // eslint-disable-next-line
+  }, [messages]);
+   
     // Hàm hiển thị từng tin nhắn
     const renderMessage = ({ item }) => {
-        const isCurrentUser = item.sender_id === currentUserId;
-        const senderInfo = userCache[item.sender_id] || {};
-        const time = moment(item.createdAt).format('hh:mm A');
+      const isCurrentUser = item.sender_id === currentUserId;
+      const senderInfo = userCache[item.sender_id] || {};
+      const time = moment(item.createdAt).format('hh:mm A');
 
-        // Bỏ qua tin nhắn đã bị xóa bởi người dùng hiện tại
-        if (item.deletedFor?.includes(currentUserId)) {
-            return null;
-        }
+      // Bỏ qua tin nhắn đã bị xóa bởi người dùng hiện tại
+      if (item.deletedFor?.includes(currentUserId)) {
+          return null;
+      }
 
-        // Hiển thị tin nhắn hệ thống
-        if (item.type === 'system') {
-            // Chọn icon theo action
-            let icon = null;
-            if (item.action === 'add') icon = <Ionicons name="person-add" size={16} color="#4caf50" style={{ marginRight: 6 }} />;
-            else if (item.action === 'remove' || item.action === 'leave') icon = <Ionicons name="person-remove" size={16} color="#f44336" style={{ marginRight: 6 }} />;
-            else if (item.action === 'update') icon = <Ionicons name="sync" size={16} color="#2196f3" style={{ marginRight: 6 }} />;
-            else if (item.action === 'disband') icon = <Ionicons name="warning" size={16} color="#ff9800" style={{ marginRight: 6 }} />;
-            // ... các action khác nếu muốn
-            return (
-                <View style={styles.systemMessageContainer}>
-                    <View style={styles.systemMessageBox}>
-                        {icon}
-                        <Text style={styles.systemMessageText}>{item.content}</Text>
-                    </View>
-                </View>
-            );
-        }
+      // Hiển thị tin nhắn hệ thống
+      if (item.type === 'system') {
+          // Chọn icon theo action
+          let icon = null;
+          if (item.action === 'add') icon = <Ionicons name="person-add" size={16} color="#4caf50" style={{ marginRight: 6 }} />;
+          else if (item.action === 'remove' || item.action === 'leave') icon = <Ionicons name="person-remove" size={16} color="#f44336" style={{ marginRight: 6 }} />;
+          else if (item.action === 'update') icon = <Ionicons name="sync" size={16} color="#2196f3" style={{ marginRight: 6 }} />;
+          else if (item.action === 'disband') icon = <Ionicons name="warning" size={16} color="#ff9800" style={{ marginRight: 6 }} />;
+          // ... các action khác nếu muốn
+          return (
+              <View style={styles.systemMessageContainer}>
+                  <View style={styles.systemMessageBox}>
+                      {icon}
+                      <Text style={styles.systemMessageText}>{item.content}</Text>
+                  </View>
+              </View>
+          );
+      }
 
         return (
             <View style={[styles.messageRow, isCurrentUser ? styles.userMessageRow : styles.friendMessageRow]}>
@@ -817,21 +816,11 @@ export default function ChatsScreen({ route }) {
                                 <Text style={styles.revokedMessageText}>Tin nhắn đã bị thu hồi</Text>
                             ) : (
                                 <>
-                                    {item.type === 'image' && <Image source={{ uri: item.url }} style={styles.image} />}
-                                    {item.type === 'video' && (
-                                        <TouchableOpacity
-                                            style={styles.videoContainer}
-                                            onPress={() => openVideoPlayer(item)}
-                                        >
-                                            {/* ... video content ... */}
-                                        </TouchableOpacity>
+                                    {(item.type === 'image' || item.type === 'video' || item.type === 'audio' || item.type === 'file') ? (
+                                        <RenderFileMessage message={item} />
+                                    ) : (
+                                        item.type === 'text' && item.content && <Text style={[styles.messageText, isCurrentUser && styles.userMessageText]}>{item.content}</Text>
                                     )}
-                                    {item.type === 'file' && (
-                                        <View style={styles.fileContainer}>
-                                            {/* ... file content ... */}
-                                        </View>
-                                    )}
-                                    {item.type === 'text' && item.content && <Text style={[styles.messageText, isCurrentUser && styles.userMessageText]}>{item.content}</Text>}
                                 </>
                             )}
                         </View>

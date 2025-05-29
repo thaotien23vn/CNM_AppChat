@@ -1,8 +1,10 @@
 import React, { useState } from 'react';
-import { View, StyleSheet, TouchableOpacity, Image, Linking } from 'react-native';
+import { View, StyleSheet, TouchableOpacity, Image, Linking, Platform } from 'react-native';
 import { Text, ActivityIndicator, IconButton } from 'react-native-paper';
 import Icon from 'react-native-vector-icons/FontAwesome';
 import Video from 'react-native-video';
+import * as FileSystem from 'expo-file-system';
+import * as Sharing from 'expo-sharing';
 
 const RenderFileMessage = ({ message, handleOpenFile }) => {
   const [isLoading, setIsLoading] = useState(true);
@@ -21,13 +23,48 @@ const RenderFileMessage = ({ message, handleOpenFile }) => {
   // Handle sending status
   const isSending = message.status === 'sending';
   
-  // Format the URL correctly
+  // Hàm format URL
   const getFormattedUrl = (url) => {
     if (!url) return null;
-    
-    return url.startsWith('http') 
-      ? url 
-      : `http://localhost:4000${url.startsWith('/') ? '' : '/'}${url}`;
+    if (url.startsWith('http')) return url;
+    if (url.startsWith('data:')) return url;
+    const path = url.startsWith('/') ? url : `/${url}`;
+    if (Platform.OS === 'web') {
+      return `${window.location.origin}${path}`;
+    }
+    return `http://localhost:4000${path}`;
+  };
+
+  // Hàm mở file phù hợp cho cả web và native
+  const handleOpenFileInternal = async (url, name, type) => {
+    if (!url) return;
+    const formattedUrl = getFormattedUrl(url);
+    if (Platform.OS === 'web') {
+      const a = document.createElement('a');
+      a.href = formattedUrl;
+      a.download = name || 'file';
+      a.target = '_blank';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    } else {
+      try {
+        // Tạo đường dẫn lưu file tạm
+        const fileUri = FileSystem.cacheDirectory + (name || 'file');
+        // Tải file về máy
+        const downloadRes = await FileSystem.downloadAsync(formattedUrl, fileUri);
+        if (Platform.OS === 'ios') {
+          // iOS: dùng Sharing để mở file
+          await Sharing.shareAsync(downloadRes.uri);
+        } else {
+          // Android: mở file bằng app mặc định
+          const contentUri = await FileSystem.getContentUriAsync(downloadRes.uri);
+          await Linking.openURL(contentUri);
+        }
+      } catch (err) {
+        alert('Không thể tải file về máy: ' + err.message);
+      }
+    }
   };
 
   // Check if temp file
@@ -85,7 +122,7 @@ const RenderFileMessage = ({ message, handleOpenFile }) => {
           iconColor="#FFFFFF"
           style={styles.downloadButton}
           size={20}
-          onPress={() => handleOpenFile(message.url, message.content, message.fileType)}
+          onPress={() => handleOpenFileInternal(message.url, message.content, message.fileType)}
         />
       </View>
     );
@@ -109,7 +146,7 @@ const RenderFileMessage = ({ message, handleOpenFile }) => {
     return (
       <TouchableOpacity 
         style={styles.imageContainer}
-        onPress={() => Linking.openURL(getFormattedUrl(message.url))}
+        onPress={() => handleOpenFileInternal(message.url, message.content, message.fileType)}
       >
         <Image
           source={{ uri: getFormattedUrl(message.url) }}
@@ -138,7 +175,7 @@ const RenderFileMessage = ({ message, handleOpenFile }) => {
           iconColor="#FFFFFF"
           style={styles.downloadButton}
           size={20}
-          onPress={() => handleOpenFile(message.url, message.content, message.fileType)}
+          onPress={() => handleOpenFileInternal(message.url, message.content, message.fileType)}
         />
       </TouchableOpacity>
     );
@@ -165,7 +202,7 @@ const RenderFileMessage = ({ message, handleOpenFile }) => {
             iconColor="#9c27b0"
             style={styles.audioButton}
             size={18}
-            onPress={() => handleOpenFile(message.url, message.content, message.fileType)}
+            onPress={() => handleOpenFileInternal(message.url, message.content, message.fileType)}
           />
         )}
       </View>
@@ -189,7 +226,7 @@ const RenderFileMessage = ({ message, handleOpenFile }) => {
       return (
         <TouchableOpacity 
           style={styles.fileContainer}
-          onPress={() => message.url && !isSending && Linking.openURL(getFormattedUrl(message.url))}
+          onPress={() => message.url && !isSending && handleOpenFileInternal(message.url, message.content, message.fileType)}
         >
           <Icon name="file" size={24} color="#3f15d6" />
           <Text variant="bodyMedium" style={styles.fileName} numberOfLines={1}>
@@ -203,7 +240,7 @@ const RenderFileMessage = ({ message, handleOpenFile }) => {
               iconColor="#3f15d6"
               style={styles.fileDownloadButton}
               size={18}
-              onPress={() => handleOpenFile(message.url, message.content, message.fileType)}
+              onPress={() => handleOpenFileInternal(message.url, message.content, message.fileType)}
             />
           )}
         </TouchableOpacity>

@@ -12,6 +12,7 @@
   "dependencies": {
     "@expo/metro-runtime": "~3.2.3",
     "@react-native-async-storage/async-storage": "^1.24.0",
+    "@react-native-community/slider": "^4.5.6",
     "@react-native-firebase/app": "^21.11.0",
     "@react-native-firebase/auth": "^21.11.0",
     "@react-navigation/bottom-tabs": "^7.2.0",
@@ -21,6 +22,8 @@
     "cors": "^2.8.5",
     "emoji-mart-native": "^0.6.5-beta",
     "expo": "~52.0.25",
+    "expo-av": "~15.0.2",
+    "expo-document-picker": "~13.0.3",
     "expo-image-picker": "~16.0.6",
     "expo-linear-gradient": "~14.0.2",
     "expo-status-bar": "~2.0.1",
@@ -40,8 +43,10 @@
     "react-native-screens": "^4.9.1",
     "react-native-uuid": "^2.0.3",
     "react-native-vector-icons": "^10.2.0",
+    "react-native-video": "^6.13.0",
     "react-native-web": "~0.19.10",
-    "socket.io-client": "^4.8.1"
+    "socket.io-client": "^4.8.1",
+    "expo-sharing": "~13.0.1"
   },
   "devDependencies": {
     "@babel/core": "^7.20.0"

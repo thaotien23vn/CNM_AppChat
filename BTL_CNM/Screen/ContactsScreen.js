@@ -2,7 +2,7 @@ import React, { useEffect, useState, useLayoutEffect } from 'react';
 import { View, Text, FlatList, TouchableOpacity, StyleSheet } from 'react-native';
 import { db } from '../Firebase/Firebase';
 import { getAuth } from 'firebase/auth';
-import { collection, query, where, getDocs } from 'firebase/firestore';
+import { collection, query, where, getDocs, onSnapshot } from 'firebase/firestore';
 import { Menu, Provider, IconButton } from 'react-native-paper';
 import Ionicons from 'react-native-vector-icons/Ionicons';
 
@@ -18,26 +18,29 @@ export default function ContactsScreen({ navigation }) {
       setIsLoading(false);
       return;
     }
-
-    const fetchFriends = async () => {
-      try {
-        const q1 = query(
-          collection(db, 'friend_requests'),
-          where('status', '==', 'accepted'),
-          where('from', '==', currentUser.uid)
-        );
-        const q2 = query(
-          collection(db, 'friend_requests'),
-          where('status', '==', 'accepted'),
-          where('to', '==', currentUser.uid)
-        );
-
-        const [fromSnap, toSnap] = await Promise.all([getDocs(q1), getDocs(q2)]);
-
-        const friendIds = new Set();
-        fromSnap.forEach(doc => friendIds.add(doc.data().to));
+    setIsLoading(true);
+    // Lắng nghe realtime friend_requests
+    const q1 = query(
+      collection(db, 'friend_requests'),
+      where('status', '==', 'accepted'),
+      where('from', '==', currentUser.uid)
+    );
+    const q2 = query(
+      collection(db, 'friend_requests'),
+      where('status', '==', 'accepted'),
+      where('to', '==', currentUser.uid)
+    );
+    const unsub1 = onSnapshot(q1, (fromSnap) => {
+      const friendIds = new Set();
+      fromSnap.forEach(doc => friendIds.add(doc.data().to));
+      // Lắng nghe q2 bên trong để luôn đồng bộ cả 2 chiều
+      const unsub2 = onSnapshot(q2, async (toSnap) => {
         toSnap.forEach(doc => friendIds.add(doc.data().from));
-
+        if (friendIds.size === 0) {
+          setFriends([]);
+          setIsLoading(false);
+          return;
+        }
         const userDocs = await Promise.all(
           Array.from(friendIds).map(async uid => {
             const userQ = query(collection(db, 'Users'), where('user_id', '==', uid));
@@ -45,16 +48,14 @@ export default function ContactsScreen({ navigation }) {
             return userSnap.docs[0]?.data();
           })
         );
-
         setFriends(userDocs.filter(Boolean));
-      } catch (error) {
-        console.error(error);
-      } finally {
         setIsLoading(false);
-      }
-    };
-
-    fetchFriends();
+      });
+      // Clean up q2 listener
+      return () => unsub2();
+    });
+    // Clean up q1 listener
+    return () => unsub1();
   }, [currentUser]);
 
   useLayoutEffect(() => {
