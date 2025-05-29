@@ -14,6 +14,7 @@ import FriendRequestsScreen from './FriendRequestsScreen';
 import CreateGroup from './CreateGroup';
 import ChatGroup from './ChatGroup';
 import GroupsScreen from './GroupsScreen';
+import CloudScreen from './CloudScreen';
 
 const Tab = createBottomTabNavigator();
 
@@ -51,6 +52,9 @@ export default function MainNavigator() {
             case 'Profile':
               iconName = focused ? 'person' : 'person-outline';
               break;
+            case 'Cloud':
+              iconName = focused ? 'cloud' : 'cloud-outline';
+              break;
           }
           return <Ionicons name={iconName} size={size} color={color} />;
         },
@@ -70,6 +74,12 @@ export default function MainNavigator() {
       <Tab.Screen name="AddFriend" component={AddFriendScreen} options={{ title: 'Kết bạn' , tabBarVisible: false, tabBarButton: () => null }} />
       <Tab.Screen name="Contacts" component={ContactsScreen} options={{ title: 'Bạn bè' }} />
       <Tab.Screen name="Groups" component={GroupsScreen} options={{ title: 'Nhóm' }} />
+      <Tab.Screen name="Cloud" component={CloudScreen} options={{
+        title: 'Cloud lưu trữ',
+        tabBarIcon: ({ focused, color, size }) => (
+          <Ionicons name={focused ? 'cloud' : 'cloud-outline'} size={size} color={color} />
+        ),
+      }} />
       <Tab.Screen name="Timeline" component={TimelineScreen} options={{ title: 'Khám Phá' }} />
       <Tab.Screen name="Profile" component={ProfileWrapper} options={{ title: 'Cá nhân', tabBarStyle: { display: isEditingState ? 'none' : 'flex' } }} />
       <Tab.Screen name="EditProfile" component={EditProfileWrapper} options={{ title: 'Chỉnh Sửa', tabBarVisible: false, tabBarButton: () => null }} />

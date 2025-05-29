@@ -141,41 +141,122 @@ export default function ChatGroup({ route, navigation }) {
 
   // Lấy thông tin nhóm
   useEffect(() => {
-    const fetchGroupInfo = async () => {
-      if (!groupId) return;
-      
-      try {
-        const groupDoc = await getDoc(doc(db, 'Conversations', groupId));
-        if (groupDoc.exists()) {
-          const groupData = groupDoc.data();
-          setGroupInfo(groupData);
-          
-          // Lấy thông tin thành viên
-          const memberPromises = groupData.members.map(async (memberId) => {
-            const userQuery = query(collection(db, 'Users'), where('user_id', '==', memberId));
-            const userSnap = await getDocs(userQuery);
-            if (!userSnap.empty) {
-              return { id: memberId, ...userSnap.docs[0].data() };
-            }
-            return { id: memberId, name: 'Unknown User' };
-          });
-          
-          const memberDetails = await Promise.all(memberPromises);
-          setMembers(memberDetails);
-          
-          // Cấu hình header
-          navigation.setOptions({
-            headerShown: false
-          });
-        }
-      } catch (error) {
-        console.error('Error fetching group info:', error);
-        Alert.alert('Lỗi', 'Không thể tải thông tin nhóm');
+    if (!groupId) return;
+
+    // Lắng nghe realtime thay đổi của nhóm
+    const unsubscribe = onSnapshot(doc(db, 'Conversations', groupId), async (groupDoc) => {
+      if (groupDoc.exists()) {
+        const groupData = groupDoc.data();
+        setGroupInfo(groupData);
+
+        // Lấy thông tin thành viên mới nhất
+        const memberPromises = groupData.members.map(async (memberId) => {
+          const userQuery = query(collection(db, 'Users'), where('user_id', '==', memberId));
+          const userSnap = await getDocs(userQuery);
+          if (!userSnap.empty) {
+            return { id: memberId, ...userSnap.docs[0].data() };
+          }
+          return { id: memberId, name: 'Unknown User' };
+        });
+        const memberDetails = await Promise.all(memberPromises);
+        setMembers(memberDetails);
+
+        // Cấu hình header
+        navigation.setOptions({
+          headerShown: false
+        });
       }
-    };
-    
-    fetchGroupInfo();
-  }, [groupId, navigation, groupName]);
+    });
+
+    return () => unsubscribe();
+  }, [groupId, navigation]);
+
+  // Lắng nghe thông tin nhóm từ UserConversation và Conversations
+  useEffect(() => {
+    if (!currentUser?.uid) return;
+
+    // Lắng nghe UserConversation
+    const userConvQuery = query(
+      collection(db, 'UserConversation'),
+      where('user_id', '==', currentUser.uid)
+    );
+
+    const unsubscribeUserConv = onSnapshot(userConvQuery, async (snapshot) => {
+      try {
+        const conversationsData = [];
+        for (const docSnap of snapshot.docs) {
+          const conId = docSnap.data().con_id;
+          
+          // Lấy thông tin chi tiết từ Conversations
+          const conversationDoc = await getDoc(doc(db, 'Conversations', conId));
+          
+          if (conversationDoc.exists()) {
+            const conData = conversationDoc.data();
+            
+            // Kiểm tra xem người dùng có trong danh sách thành viên không
+            const isMember = conData.members.some(member => 
+              typeof member === 'object' ? member.user_id === currentUser.uid : member === currentUser.uid
+            );
+
+            if (isMember) {
+              conversationsData.push({
+                ...conData,
+                con_id: conId
+              });
+            }
+          }
+        }
+        
+        setConversations(conversationsData);
+      } catch (error) {
+        console.error('Lỗi khi lấy thông tin nhóm:', error);
+      }
+    });
+
+    return () => unsubscribeUserConv();
+  }, [currentUser]);
+
+  // Lắng nghe thông tin chi tiết của nhóm hiện tại
+  useEffect(() => {
+    if (!groupId) return;
+
+    const unsubscribeGroup = onSnapshot(doc(db, 'Conversations', groupId), async (groupDoc) => {
+      if (groupDoc.exists()) {
+        const groupData = groupDoc.data();
+        setGroupInfo(groupData);
+
+        // Lấy thông tin chi tiết của các thành viên
+        const memberPromises = groupData.members.map(async (member) => {
+          const userId = typeof member === 'object' ? member.user_id : member;
+          const userQuery = query(collection(db, 'Users'), where('user_id', '==', userId));
+          const userSnap = await getDocs(userQuery);
+          
+          if (!userSnap.empty) {
+            const userData = userSnap.docs[0].data();
+            return {
+              id: userId,
+              ...userData,
+              user_name: member.user_name || userData.fullName || userData.name || userData.email
+            };
+          }
+          return {
+            id: userId,
+            user_name: member.user_name || 'Unknown User'
+          };
+        });
+
+        const memberDetails = await Promise.all(memberPromises);
+        setMembers(memberDetails);
+
+        // Cấu hình header
+        navigation.setOptions({
+          headerShown: false
+        });
+      }
+    });
+
+    return () => unsubscribeGroup();
+  }, [groupId, navigation]);
 
   // Lấy tin nhắn
   useEffect(() => {
@@ -595,104 +676,6 @@ export default function ChatGroup({ route, navigation }) {
     }
   };
 
-  // Lấy danh sách tất cả các cuộc trò chuyện cho tính năng chuyển tiếp
-  useEffect(() => {
-    if (!currentUser || !currentUser.uid) return;
-    
-    const fetchConversations = async () => {
-      try {
-        const userConversationsQuery = query(
-          collection(db, 'UserConversation'), 
-          where('user_id', '==', currentUser.uid)
-        );
-        const userConversationsSnapshot = await getDocs(userConversationsQuery);
-        
-        const conversationsData = [];
-        for (const docSnap of userConversationsSnapshot.docs) {
-          const conId = docSnap.data().con_id;
-          const conversationDoc = await getDoc(doc(db, 'Conversations', conId));
-          
-          if (conversationDoc.exists()) {
-            const conData = conversationDoc.data();
-            conversationsData.push({
-              ...conData,
-              con_id: conId
-            });
-          }
-        }
-        
-        setConversations(conversationsData);
-      } catch (error) {
-        console.error('Error fetching conversations:', error);
-      }
-    };
-    
-    fetchConversations();
-  }, [currentUser]);
-
-  // Hàm mở modal chuyển tiếp tin nhắn
-  const openForwardModal = useCallback((message) => {
-    setForwardMessage(message);
-    setShowForwardModal(true);
-    setSelectedConversations([]);
-  }, []);
-
-  // Hàm xử lý trả lời tin nhắn
-  const handleReplyToMessage = (message) => {
-    setReplyToMessage(message);
-    setShowMoreOptions(false);
-  };
-
-  // Hàm chọn/bỏ chọn cuộc trò chuyện để chuyển tiếp
-  const toggleConversationSelection = useCallback((conversation) => {
-    setSelectedConversations(prev => {
-      const isSelected = prev.some(c => c.con_id === conversation.con_id);
-      return isSelected
-        ? prev.filter(c => c.con_id !== conversation.con_id)
-        : [...prev, conversation];
-    });
-  }, []);
-
-  // Hàm thực hiện việc chuyển tiếp tin nhắn
-  const handleSendForwardMessage = useCallback(async () => {
-    if (!forwardMessage || !selectedConversations.length) return;
-
-    try {
-      // Chuẩn bị dữ liệu tin nhắn dựa trên loại tin nhắn
-      const messageData = {
-        sender_id: currentUser.uid,
-        content: forwardMessage.content,
-        type: forwardMessage.type,
-        createdAt: Date.now(),
-        timestamp: Date.now(),
-        isRevoked: false,
-        seen: false
-      };
-
-      // Thêm URL nếu là hình ảnh, video hoặc file
-      if (forwardMessage.type === 'image' || forwardMessage.type === 'video' || forwardMessage.type === 'file') {
-        messageData.url = forwardMessage.url;
-      }
-
-      // Gửi tin nhắn đến tất cả các cuộc trò chuyện đã chọn
-      await Promise.all(
-        selectedConversations.map(conv =>
-          addDoc(collection(db, MESSAGE_COLLECTION), {
-            ...messageData,
-            con_id: conv.con_id
-          })
-        )
-      );
-      setShowForwardModal(false);
-      setForwardMessage(null);
-      setSelectedConversations([]);
-      Alert.alert('Thành công', 'Tin nhắn đã được chuyển tiếp');
-    } catch (error) {
-      console.error('Lỗi khi chuyển tiếp tin nhắn:', error);
-      Alert.alert('Lỗi', 'Không thể chuyển tiếp tin nhắn. Vui lòng thử lại.');
-    }
-  }, [forwardMessage, selectedConversations, currentUser]);
-
   // Hàm rời nhóm
   const leaveGroup = async () => {
     try {
@@ -733,11 +716,13 @@ export default function ChatGroup({ route, navigation }) {
         }
       } else {
         // Cập nhật danh sách thành viên để loại bỏ người dùng hiện tại
-        const updatedMembers = groupInfo.members.filter(id => id !== currentUser.uid);
-        
+        const removeIndex = groupInfo.members.findIndex(m => m.user_id === currentUser.uid);
+        const updatedMembers = groupInfo.members.filter(m => m.user_id !== currentUser.uid);
+        const updatedMessInfo = groupInfo.mess_info.filter((_, idx) => idx !== removeIndex);
         // Cập nhật nhóm
         await updateDoc(doc(db, 'Conversations', groupId), {
-          members: updatedMembers
+          members: updatedMembers,
+          mess_info: updatedMessInfo
         });
 
         // Xóa liên kết UserConversation
@@ -1040,10 +1025,28 @@ export default function ChatGroup({ route, navigation }) {
     }
     setIsAddingMembers(true);
     try {
-      // Thêm từng thành viên bằng conversationApi.addMemberToGroup
+      // Cập nhật danh sách thành viên trong nhóm
+      const updatedMembers = [...groupInfo.members];
+      const updatedMessInfo = [...(groupInfo.mess_info || [])];
+
       for (const friend of selectedFriends) {
-        await conversationApi.addMemberToGroup(groupId, friend.user_id);
-        // Gửi tin nhắn hệ thống sau khi thêm thành viên
+        // Thêm thành viên mới vào mảng members
+        updatedMembers.push({
+          user_id: friend.user_id,
+          user_name: friend.fullName || friend.name || friend.email
+        });
+        // Thêm tin nhắn rỗng vào mess_info
+        updatedMessInfo.push("");
+      }
+
+      // Cập nhật thông tin nhóm
+      await updateDoc(doc(db, 'Conversations', groupId), {
+        members: updatedMembers,
+        mess_info: updatedMessInfo
+      });
+
+      // Gửi tin nhắn hệ thống
+      for (const friend of selectedFriends) {
         await messageApi.sendMessage({
           con_id: groupId,
           content: `${friend.fullName || friend.name || 'Một thành viên mới'} đã được thêm vào nhóm`,
@@ -1052,6 +1055,7 @@ export default function ChatGroup({ route, navigation }) {
           action: "add"
         });
       }
+
       setShowAddMembersModal(false);
       setSelectedFriends([]);
       Alert.alert('Thành công', 'Đã thêm thành viên vào nhóm');
@@ -1069,11 +1073,25 @@ export default function ChatGroup({ route, navigation }) {
       Alert.alert('Lỗi', 'Không thể xóa quản trị viên khỏi nhóm.');
       return;
     }
+
     const memberToRemove = members.find(member => member.id === memberId);
     const memberName = memberToRemove?.fullName || memberToRemove?.name || memberToRemove?.email || 'Một thành viên';
+
     try {
-      await conversationApi.removeMemberFromGroup(groupId, memberId);
+      // Cập nhật danh sách thành viên
+      const removeIndex = groupInfo.members.findIndex(m => m.user_id === memberId);
+      const updatedMembers = groupInfo.members.filter(m => m.user_id !== memberId);
+      // Cập nhật mess_info tương ứng
+      const updatedMessInfo = groupInfo.mess_info.filter((_, idx) => idx !== removeIndex);
+
+      // Cập nhật nhóm
+      await updateDoc(doc(db, 'Conversations', groupId), {
+        members: updatedMembers,
+        mess_info: updatedMessInfo
+      });
+
       setMembers(prev => prev.filter(member => member.id !== memberId));
+      
       await messageApi.sendMessage({
         con_id: groupId,
         content: `${memberName} đã bị xóa khỏi nhóm`,
@@ -1081,7 +1099,19 @@ export default function ChatGroup({ route, navigation }) {
         type: "notification",
         action: "remove"
       });
-      // Cập nhật lại groupInfo (nếu cần)
+
+      // Xóa UserConversation tương ứng
+      const userConvQuery = query(
+        collection(db, 'UserConversation'),
+        where('con_id', '==', groupId),
+        where('user_id', '==', memberId)
+      );
+      const userConvSnapshot = await getDocs(userConvQuery);
+      for (const docSnap of userConvSnapshot.docs) {
+        await deleteDoc(docSnap.ref);
+      }
+
+      // Cập nhật lại groupInfo
       const groupDoc = await getDoc(doc(db, 'Conversations', groupId));
       if (groupDoc.exists()) {
         setGroupInfo(groupDoc.data());
